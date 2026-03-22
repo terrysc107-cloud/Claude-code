@@ -2,41 +2,49 @@
 Philadelphia Absentee Owner Lead Scraper
 ========================================
 Pulls property records from the Philadelphia Office of Property Assessment (OPA)
-open data API and identifies absentee owners who likely rent out their properties.
+via the city's public Carto SQL API and identifies absentee owners who likely
+rent out their properties.
 
-Data source: https://data.phila.gov/resource/ub8h-6ry8.json
-             (OPA Properties Public dataset — no API key required)
+Data source: https://phl.carto.com/api/v2/sql
+Table:       opa_properties_public  (updates nightly, no API key required)
+Info:        https://opendataphilly.org/datasets/philadelphia-properties-and-assessment-history/
+
+NOTE on email / phone
+---------------------
+The OPA dataset contains owner name and mailing address ONLY.
+Phone numbers and email addresses are not included — this is public
+property-tax assessment data. To enrich leads with contact info, use a
+skip-tracing service such as BatchSkipTracing, PropStream, or REISkip.
 
 Absentee owner logic
 --------------------
-A property owner is flagged as "absentee" when the owner's mailing address
-differs from the property address, meaning they don't live at the property.
+A property owner is flagged as "absentee" when the owner's mailing street
+address differs from the property address (they don't live at the property).
 This strongly correlates with rental ownership.
 
 Additional rental-likelihood signals
 -------------------------------------
-  - Out-of-state mailing address (investor landlord)
-  - Out-of-Philadelphia mailing address within PA
-  - Multi-family property type (duplex, triplex, apt building)
-  - High bedroom count relative to property type
+  - Out-of-state mailing address (+2)
+  - Out-of-Philadelphia, in-state mailing address (+1)
+  - Multi-family / hotel / mixed-use building code (+1)
+  - Hotel/apt or mixed-use category code (+1)
+  - 4+ bedrooms (+1)
+  - Has homestead exemption — owner-occupied indicator (-1)
 
 Usage
 -----
-    python scraper.py [--limit N] [--out FILE] [--min-score N] [--token TOKEN]
+    python scraper.py [--limit N] [--zip ZIP ...] [--out FILE] [--min-score N]
 
-    --limit N       Max records to pull from OPA (default: 50000, 0 = all)
-    --out FILE      Output CSV path (default: philly_absentee_leads.csv)
-    --min-score N   Minimum rental-likelihood score to include (default: 1)
-    --token TOKEN   Socrata app token to avoid IP throttling (optional).
-                    Can also be set via SOCRATA_APP_TOKEN env var.
-                    Get one free at https://data.phila.gov/profile/app_tokens
+    --limit N       Max records to fetch (default: 1000, 0 = all)
+    --zip ZIP ...   Filter to specific zip codes (e.g. --zip 19143 19131 19139)
+    --out FILE      Output CSV (default: philly_absentee_leads.csv)
+    --min-score N   Minimum rental-likelihood score 0–5 (default: 0)
     --no-progress   Disable progress bar
 """
 
 import argparse
 import csv
 import logging
-import os
 import sys
 import time
 from typing import Any
@@ -48,60 +56,40 @@ from tqdm import tqdm
 # Configuration
 # ---------------------------------------------------------------------------
 
-OPA_API_URL = "https://data.phila.gov/resource/ub8h-6ry8.json"
+CARTO_SQL_URL = "https://phl.carto.com/api/v2/sql"
+TABLE = "opa_properties_public"
 
-# Socrata page size (max 1000 per request)
+# Carto page size
 PAGE_SIZE = 1000
 
-# OPA category codes that indicate residential / rental use
-#   1 = Residential
+# category_code values for residential / rental / mixed-use
+#   1 = Single Family / Residential
 #   2 = Hotels & Apartments
 #   3 = Store with Dwelling (mixed-use)
-RENTAL_CATEGORY_CODES = {"1", "2", "3"}
+RENTAL_CATEGORIES = ("1", "2", "3")
 
-# Building codes that strongly indicate multi-unit / rental use
-# Philadelphia OPA building code descriptions (partial list):
-#   A  = Row home / townhouse
-#   B  = Twin / semi-detached
-#   C  = Detached
-#   H  = Mixed-use / commercial with residential
-#   I  = Industrial with residential
-#   R  = Row w/ garage
-#   S  = Single family
-#   D  = Detached garage
-#   P  = Parking
-# Multi-family indicators:
+# Building codes that indicate multi-unit / rental use
 MULTIFAMILY_BUILDING_CODES = {
-    "C2",  # Semi-det 2-story
-    "C3",  # Semi-det 3-story
-    "I1",  # Store/office with 1 apt
-    "I2",  # Store/office with 2 apts
-    "I3",  # Store/office with 3+ apts
-    "H1",  # Conv. apt 3-unit
-    "H2",  # Conv. apt 4–6 unit
-    "H3",  # Conv. apt 7+ unit
-    "G1",  # Det. w/ 1 comm unit
-    "G2",  # Det. w/ 2 comm units
-    "W1",  # Rooming house
-    "W2",  # Large rooming house
+    "I1", "I2", "I3",   # store/office with 1/2/3+ apts
+    "H1", "H2", "H3",   # converted apt 3-unit / 4-6 unit / 7+ unit
+    "G1", "G2",          # detached with commercial units
+    "W1", "W2",          # rooming houses
+    "C2", "C3",          # semi-detached 2/3 story
 }
 
-# Socrata $where filter — pull only residential/hotel/mixed-use properties
-WHERE_CLAUSE = "category_code IN('1','2','3')"
-
-# Fields we actually need (reduces payload size)
-SELECT_FIELDS = ",".join([
+# Fields to retrieve
+SELECT_FIELDS = ", ".join([
     "parcel_number",
     "location",
     "unit",
     "zip_code",
     "owner_1",
     "owner_2",
+    "mailing_street",
     "mailing_address_1",
     "mailing_address_2",
     "mailing_care_of",
-    "mailing_city",
-    "mailing_state",
+    "mailing_city_state",
     "mailing_zip",
     "building_code",
     "building_code_description",
@@ -115,6 +103,8 @@ SELECT_FIELDS = ",".join([
     "market_value",
     "year_built",
     "homestead_exemption",
+    "sale_date",
+    "sale_price",
 ])
 
 logging.basicConfig(
@@ -129,21 +119,39 @@ log = logging.getLogger(__name__)
 # Fetching
 # ---------------------------------------------------------------------------
 
-def fetch_page(session: requests.Session, offset: int, limit: int) -> list[dict]:
-    """Fetch one page of OPA records."""
-    params: dict[str, Any] = {
-        "$limit": min(PAGE_SIZE, limit) if limit else PAGE_SIZE,
-        "$offset": offset,
-        "$where": WHERE_CLAUSE,
-        "$select": SELECT_FIELDS,
-        "$order": "parcel_number ASC",
-    }
+def build_where(zip_codes: list[str] | None) -> str:
+    cats = ", ".join(f"'{c}'" for c in RENTAL_CATEGORIES)
+    base = f"category_code IN ({cats})"
+    if zip_codes:
+        zips = ", ".join(f"'{z.strip()}'" for z in zip_codes)
+        base += f" AND zip_code IN ({zips})"
+    return base
+
+
+def fetch_page(
+    session: requests.Session,
+    offset: int,
+    page_size: int,
+    where: str,
+) -> list[dict]:
+    """Fetch one page via Carto SQL API."""
+    sql = (
+        f"SELECT {SELECT_FIELDS} "
+        f"FROM {TABLE} "
+        f"WHERE {where} "
+        f"ORDER BY parcel_number "
+        f"LIMIT {page_size} OFFSET {offset}"
+    )
     for attempt in range(5):
         try:
-            resp = session.get(OPA_API_URL, params=params, timeout=30)
+            resp = session.get(
+                CARTO_SQL_URL,
+                params={"q": sql, "format": "json"},
+                timeout=30,
+            )
             resp.raise_for_status()
-            return resp.json()
-        except (requests.RequestException, ValueError) as exc:
+            return resp.json().get("rows", [])
+        except (requests.RequestException, ValueError, KeyError) as exc:
             if attempt == 4:
                 raise
             wait = 2 ** attempt
@@ -153,42 +161,33 @@ def fetch_page(session: requests.Session, offset: int, limit: int) -> list[dict]
 
 
 def fetch_all(
-    max_records: int = 50_000,
+    max_records: int = 1_000,
+    zip_codes: list[str] | None = None,
     show_progress: bool = True,
-    app_token: str | None = None,
 ) -> list[dict]:
-    """Pull all matching OPA records with pagination."""
+    """Pull OPA records with pagination."""
     session = requests.Session()
-    headers: dict[str, str] = {"Accept": "application/json"}
-    if app_token:
-        headers["X-App-Token"] = app_token
-        log.info("Using Socrata app token (throttle limits lifted).")
-    else:
-        log.warning(
-            "No Socrata app token provided. Requests may be throttled on large pulls. "
-            "Set --token or SOCRATA_APP_TOKEN to avoid this."
-        )
-    session.headers.update(headers)
+    session.headers.update({"Accept": "application/json"})
+
+    where = build_where(zip_codes)
+    if zip_codes:
+        log.info("Zip code filter: %s", ", ".join(zip_codes))
 
     records: list[dict] = []
     offset = 0
-    pbar = tqdm(
-        desc="Fetching OPA records",
-        unit=" records",
-        disable=not show_progress,
-    )
+    pbar = tqdm(desc="Fetching OPA records", unit=" recs", disable=not show_progress)
 
     while True:
-        remaining = (max_records - offset) if max_records else PAGE_SIZE
-        if remaining <= 0:
+        batch = min(PAGE_SIZE, max_records - offset) if max_records else PAGE_SIZE
+        if batch <= 0:
             break
-        page = fetch_page(session, offset, remaining)
+        page = fetch_page(session, offset, batch, where)
         if not page:
             break
         records.extend(page)
         pbar.update(len(page))
         offset += len(page)
-        if len(page) < PAGE_SIZE:
+        if len(page) < batch:
             break  # last page
 
     pbar.close()
@@ -200,70 +199,65 @@ def fetch_all(
 # Absentee / rental scoring
 # ---------------------------------------------------------------------------
 
-def normalise(value: str | None) -> str:
-    """Lowercase and strip whitespace."""
-    return (value or "").strip().lower()
+def norm(value: Any) -> str:
+    return str(value or "").strip().lower()
 
 
-def is_absentee(record: dict) -> bool:
+def is_absentee(rec: dict) -> bool:
     """
-    Return True when the owner's mailing address is different from the
-    property address — the primary signal of an absentee (non-resident) owner.
+    True when owner mailing street ≠ property address.
+    Uses mailing_street (the actual street line) vs location (property address).
     """
-    prop_street = normalise(record.get("location"))
-    mail_street = normalise(record.get("mailing_address_1"))
-
-    if not prop_street or not mail_street:
+    prop = norm(rec.get("location"))
+    mail = norm(rec.get("mailing_street") or rec.get("mailing_address_1"))
+    if not prop or not mail:
         return False
-
-    # Remove common noise so "123 MAIN ST" == "123 Main St"
-    return prop_street != mail_street
+    return prop != mail
 
 
-def rental_score(record: dict) -> int:
+def parse_city_state(city_state: str) -> tuple[str, str]:
     """
-    Score 0–5 indicating how likely this absentee-owned property is a rental.
-
-    Points are additive:
-      +2  Out-of-state owner (strong investor signal)
-      +1  Out-of-Philadelphia but in-state owner
-      +1  Multi-family building code
-      +1  Multi-unit category (hotels/apartments or mixed-use)
-      +1  4+ bedrooms (common in student / multi-tenant rentals)
-      -1  Has homestead exemption (owner-occupied indicator — reduces score)
+    Split 'PHILADELPHIA PA' → ('philadelphia', 'pa').
+    Handles 'CITY ST' format — last token is state code.
     """
+    parts = city_state.strip().split()
+    if len(parts) >= 2:
+        return " ".join(parts[:-1]).lower(), parts[-1].lower()
+    return city_state.lower(), ""
+
+
+def rental_score(rec: dict) -> int:
     score = 0
 
-    mail_state = normalise(record.get("mailing_state"))
-    mail_city = normalise(record.get("mailing_city"))
-    building_code = (record.get("building_code") or "").strip().upper()
-    category_code = str(record.get("category_code") or "").strip()
-    homestead = str(record.get("homestead_exemption") or "0").strip()
+    city_state = norm(rec.get("mailing_city_state", ""))
+    city, state = parse_city_state(city_state)
+    building_code = str(rec.get("building_code") or "").strip().upper()
+    category_code = str(rec.get("category_code") or "").strip()
+    homestead = rec.get("homestead_exemption") or 0
 
     # Out-of-state owner
-    if mail_state and mail_state not in ("pa", ""):
+    if state and state != "pa":
         score += 2
-    # Out-of-city but still PA
-    elif mail_state == "pa" and mail_city and mail_city not in ("philadelphia", "phila", "phila."):
+    # Out-of-city but PA
+    elif state == "pa" and city and city not in ("philadelphia", "phila", "phila."):
         score += 1
 
     # Multi-family building code
     if building_code in MULTIFAMILY_BUILDING_CODES:
         score += 1
 
-    # Hotel / apartment or mixed-use category
+    # Hotel/apt or mixed-use category
     if category_code in ("2", "3"):
         score += 1
 
-    # High bedroom count → multi-tenant
+    # 4+ bedrooms → multi-tenant
     try:
-        bedrooms = int(record.get("number_of_bedrooms") or 0)
-        if bedrooms >= 4:
+        if int(rec.get("number_of_bedrooms") or 0) >= 4:
             score += 1
     except (ValueError, TypeError):
         pass
 
-    # Homestead exemption → likely primary residence, not rental
+    # Homestead exemption → likely primary residence
     try:
         if float(homestead) > 0:
             score -= 1
@@ -284,61 +278,67 @@ OUTPUT_FIELDS = [
     "property_zip",
     "owner_1",
     "owner_2",
-    "mailing_address",
-    "mailing_city",
-    "mailing_state",
-    "mailing_zip",
+    "owner_mailing_street",
+    "owner_mailing_city_state",
+    "owner_mailing_zip",
     "building_code",
     "building_code_description",
     "category",
     "bedrooms",
     "total_area_sqft",
     "market_value",
+    "last_sale_date",
+    "last_sale_price",
     "year_built",
     "absentee_type",
     "rental_likelihood_score",
+    "email",
+    "phone",
 ]
 
 
-def build_lead(record: dict, score: int) -> dict:
-    """Flatten an OPA record into a lead dict."""
-    mail_state = normalise(record.get("mailing_state"))
+def absentee_type(rec: dict) -> str:
+    city_state = norm(rec.get("mailing_city_state", ""))
+    city, state = parse_city_state(city_state)
+    if state and state != "pa":
+        return "Out-of-state"
+    if state == "pa" and city and city not in ("philadelphia", "phila", "phila."):
+        return "Out-of-city (PA)"
+    return "Local absentee"
 
-    if mail_state and mail_state not in ("pa", ""):
-        absentee_type = "Out-of-state"
-    elif mail_state == "pa" and normalise(record.get("mailing_city")) not in (
-        "philadelphia", "phila", "phila.", ""
-    ):
-        absentee_type = "Out-of-city (PA)"
-    else:
-        absentee_type = "Local absentee"
 
-    mailing_parts = filter(None, [
-        record.get("mailing_care_of"),
-        record.get("mailing_address_1"),
-        record.get("mailing_address_2"),
-    ])
+def build_lead(rec: dict, score: int) -> dict:
+    mail_parts = [
+        rec.get("mailing_care_of"),
+        rec.get("mailing_street") or rec.get("mailing_address_1"),
+        rec.get("mailing_address_2"),
+    ]
+    mail_street = " | ".join(p for p in mail_parts if p)
 
     return {
-        "parcel_number": record.get("parcel_number", ""),
-        "property_address": record.get("location", ""),
-        "unit": record.get("unit", ""),
-        "property_zip": record.get("zip_code", ""),
-        "owner_1": record.get("owner_1", ""),
-        "owner_2": record.get("owner_2", ""),
-        "mailing_address": " ".join(mailing_parts).strip(),
-        "mailing_city": record.get("mailing_city", ""),
-        "mailing_state": record.get("mailing_state", ""),
-        "mailing_zip": record.get("mailing_zip", ""),
-        "building_code": record.get("building_code", ""),
-        "building_code_description": record.get("building_code_description", ""),
-        "category": record.get("category_code_description", ""),
-        "bedrooms": record.get("number_of_bedrooms", ""),
-        "total_area_sqft": record.get("total_area", ""),
-        "market_value": record.get("market_value", ""),
-        "year_built": record.get("year_built", ""),
-        "absentee_type": absentee_type,
+        "parcel_number": rec.get("parcel_number", ""),
+        "property_address": rec.get("location", ""),
+        "unit": rec.get("unit", "") or "",
+        "property_zip": rec.get("zip_code", ""),
+        "owner_1": rec.get("owner_1", ""),
+        "owner_2": rec.get("owner_2", "") or "",
+        "owner_mailing_street": mail_street,
+        "owner_mailing_city_state": rec.get("mailing_city_state", ""),
+        "owner_mailing_zip": rec.get("mailing_zip", ""),
+        "building_code": rec.get("building_code", ""),
+        "building_code_description": rec.get("building_code_description", ""),
+        "category": rec.get("category_code_description", ""),
+        "bedrooms": rec.get("number_of_bedrooms", "") or "",
+        "total_area_sqft": rec.get("total_area", "") or "",
+        "market_value": rec.get("market_value", "") or "",
+        "last_sale_date": (rec.get("sale_date") or "")[:10],
+        "last_sale_price": rec.get("sale_price", "") or "",
+        "year_built": rec.get("year_built", "") or "",
+        "absentee_type": absentee_type(rec),
         "rental_likelihood_score": score,
+        # OPA data does not include contact info — use a skip-tracing service
+        "email": "N/A - use skip tracing",
+        "phone": "N/A - use skip tracing",
     }
 
 
@@ -359,40 +359,24 @@ def parse_args() -> argparse.Namespace:
         description="Scrape Philadelphia OPA data for absentee-owner rental leads."
     )
     parser.add_argument(
-        "--limit",
-        type=int,
-        default=50_000,
-        metavar="N",
-        help="Max OPA records to fetch (0 = all, default: 50000).",
+        "--limit", type=int, default=1_000, metavar="N",
+        help="Max OPA records to fetch (0 = all, default: 1000).",
     )
     parser.add_argument(
-        "--out",
-        default="philly_absentee_leads.csv",
-        metavar="FILE",
-        help="Output CSV file path (default: philly_absentee_leads.csv).",
+        "--zip", nargs="+", metavar="ZIP", dest="zip_codes",
+        help="Filter to zip codes (e.g. --zip 19143 19131 19139).",
     )
     parser.add_argument(
-        "--min-score",
-        type=int,
-        default=1,
-        dest="min_score",
-        metavar="N",
-        help="Minimum rental-likelihood score to include (0–5, default: 1).",
+        "--out", default="philly_absentee_leads.csv", metavar="FILE",
+        help="Output CSV path (default: philly_absentee_leads.csv).",
     )
     parser.add_argument(
-        "--token",
-        default=os.environ.get("SOCRATA_APP_TOKEN"),
-        metavar="TOKEN",
-        help=(
-            "Socrata app token to lift IP throttling. "
-            "Defaults to SOCRATA_APP_TOKEN env var. "
-            "Free registration: https://data.phila.gov/profile/app_tokens"
-        ),
+        "--min-score", type=int, default=0, dest="min_score", metavar="N",
+        help="Minimum rental-likelihood score 0–5 (default: 0).",
     )
     parser.add_argument(
-        "--no-progress",
-        action="store_true",
-        help="Disable the tqdm progress bar.",
+        "--no-progress", action="store_true",
+        help="Disable progress bar.",
     )
     return parser.parse_args()
 
@@ -401,17 +385,16 @@ def main() -> None:
     args = parse_args()
 
     log.info("Starting Philadelphia absentee owner scraper.")
-    log.info("Fetching up to %s records from OPA API…",
-             f"{args.limit:,}" if args.limit else "all")
+    log.info("Fetching up to %s records…", f"{args.limit:,}" if args.limit else "all")
 
     records = fetch_all(
         max_records=args.limit,
+        zip_codes=args.zip_codes,
         show_progress=not args.no_progress,
-        app_token=args.token,
     )
 
     if not records:
-        log.error("No records returned from API. Exiting.")
+        log.error("No records returned. Check your zip codes or try again.")
         sys.exit(1)
 
     leads: list[dict] = []
@@ -425,44 +408,40 @@ def main() -> None:
         if score >= args.min_score:
             leads.append(build_lead(rec, score))
 
-    # Sort: highest rental-likelihood score first, then by market value desc
-    leads.sort(
-        key=lambda r: (
-            -int(r["rental_likelihood_score"]),
-            -(float(r["market_value"]) if r["market_value"] else 0),
-        )
-    )
+    leads.sort(key=lambda r: (
+        -int(r["rental_likelihood_score"]),
+        -(float(r["market_value"]) if r["market_value"] else 0),
+    ))
 
     log.info(
-        "Results: %d total records → %d absentee owners → %d leads (score ≥ %d)",
-        len(records),
-        absentee_count,
-        len(leads),
-        args.min_score,
+        "Results: %d fetched → %d absentee owners → %d leads (score ≥ %d)",
+        len(records), absentee_count, len(leads), args.min_score,
     )
 
     if not leads:
-        log.warning("No leads matched the criteria. Try lowering --min-score.")
+        log.warning("No leads matched. Try --min-score 0.")
         sys.exit(0)
 
-    # Print summary breakdown
-    score_counts: dict[int, int] = {}
-    type_counts: dict[str, int] = {}
+    # Summary breakdown
+    score_dist: dict[int, int] = {}
+    type_dist: dict[str, int] = {}
     for lead in leads:
-        s = lead["rental_likelihood_score"]
+        s = int(lead["rental_likelihood_score"])
         t = lead["absentee_type"]
-        score_counts[s] = score_counts.get(s, 0) + 1
-        type_counts[t] = type_counts.get(t, 0) + 1
+        score_dist[s] = score_dist.get(s, 0) + 1
+        type_dist[t] = type_dist.get(t, 0) + 1
 
     print("\n── Score distribution ──────────────────")
-    for score in sorted(score_counts, reverse=True):
-        print(f"  Score {score}: {score_counts[score]:>6,} leads")
+    for s in sorted(score_dist, reverse=True):
+        print(f"  Score {s}: {score_dist[s]:>5,} leads")
 
-    print("\n── Absentee type breakdown ─────────────")
-    for atype, count in sorted(type_counts.items(), key=lambda x: -x[1]):
-        print(f"  {atype:<25} {count:>6,} leads")
+    print("\n── Absentee type ───────────────────────")
+    for t, c in sorted(type_dist.items(), key=lambda x: -x[1]):
+        print(f"  {t:<25} {c:>5,} leads")
 
-    print()
+    print(f"\n  NOTE: Email/phone not in OPA data.")
+    print(f"  Use BatchSkipTracing, PropStream, or REISkip to enrich leads.\n")
+
     write_csv(leads, args.out)
     log.info("Done.")
 
