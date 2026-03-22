@@ -22,17 +22,21 @@ Additional rental-likelihood signals
 
 Usage
 -----
-    python scraper.py [--limit N] [--out FILE] [--min-score N]
+    python scraper.py [--limit N] [--out FILE] [--min-score N] [--token TOKEN]
 
     --limit N       Max records to pull from OPA (default: 50000, 0 = all)
     --out FILE      Output CSV path (default: philly_absentee_leads.csv)
     --min-score N   Minimum rental-likelihood score to include (default: 1)
+    --token TOKEN   Socrata app token to avoid IP throttling (optional).
+                    Can also be set via SOCRATA_APP_TOKEN env var.
+                    Get one free at https://data.phila.gov/profile/app_tokens
     --no-progress   Disable progress bar
 """
 
 import argparse
 import csv
 import logging
+import os
 import sys
 import time
 from typing import Any
@@ -148,10 +152,23 @@ def fetch_page(session: requests.Session, offset: int, limit: int) -> list[dict]
     return []
 
 
-def fetch_all(max_records: int = 50_000, show_progress: bool = True) -> list[dict]:
+def fetch_all(
+    max_records: int = 50_000,
+    show_progress: bool = True,
+    app_token: str | None = None,
+) -> list[dict]:
     """Pull all matching OPA records with pagination."""
     session = requests.Session()
-    session.headers.update({"Accept": "application/json"})
+    headers: dict[str, str] = {"Accept": "application/json"}
+    if app_token:
+        headers["X-App-Token"] = app_token
+        log.info("Using Socrata app token (throttle limits lifted).")
+    else:
+        log.warning(
+            "No Socrata app token provided. Requests may be throttled on large pulls. "
+            "Set --token or SOCRATA_APP_TOKEN to avoid this."
+        )
+    session.headers.update(headers)
 
     records: list[dict] = []
     offset = 0
@@ -363,6 +380,16 @@ def parse_args() -> argparse.Namespace:
         help="Minimum rental-likelihood score to include (0–5, default: 1).",
     )
     parser.add_argument(
+        "--token",
+        default=os.environ.get("SOCRATA_APP_TOKEN"),
+        metavar="TOKEN",
+        help=(
+            "Socrata app token to lift IP throttling. "
+            "Defaults to SOCRATA_APP_TOKEN env var. "
+            "Free registration: https://data.phila.gov/profile/app_tokens"
+        ),
+    )
+    parser.add_argument(
         "--no-progress",
         action="store_true",
         help="Disable the tqdm progress bar.",
@@ -380,6 +407,7 @@ def main() -> None:
     records = fetch_all(
         max_records=args.limit,
         show_progress=not args.no_progress,
+        app_token=args.token,
     )
 
     if not records:
