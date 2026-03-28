@@ -1,0 +1,22 @@
+# Secrets and credentials
+.env
+
+# Plaid runtime state (contains access_token — never commit)
+plaid_state.json
+
+# Transaction data and generated dashboard (can contain sensitive financial data)
+transactions.json
+dashboard.html
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
