@@ -1,15 +1,12 @@
 """
-plaid_sync.py — Sync Plaid transactions and regenerate the interactive dashboard.
+plaid_sync.py — Sync Plaid transactions via Supabase and regenerate the dashboard.
 
 Usage:
     python plaid_sync.py
 
-Reads access_token + cursor from plaid_state.json (created by plaid_setup.py).
-Appends new/updated transactions to transactions.json.
-Regenerates dashboard.html with the full dataset embedded.
-
-Schedule via cron:
-    0 */6 * * * cd /path/to/repo && python plaid_sync.py >> plaid_sync.log 2>&1
+Reads access_token + cursor from Supabase plaid_tokens table.
+Upserts transactions to Supabase transactions table.
+Regenerates public/dashboard.html with the full dataset embedded.
 """
 
 import json
@@ -23,15 +20,63 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-STATE_FILE = Path("plaid_state.json")
-TRANSACTIONS_FILE = Path("transactions.json")
-DASHBOARD_FILE = Path("dashboard.html")
+DASHBOARD_FILE = Path("public/dashboard.html")
 
 PLAID_ENVS = {
     "sandbox": "https://sandbox.plaid.com",
     "development": "https://development.plaid.com",
     "production": "https://production.plaid.com",
 }
+
+
+# ---------------------------------------------------------------------------
+# Supabase helpers
+# ---------------------------------------------------------------------------
+
+def supabase_headers() -> dict:
+    key = os.environ.get("SUPABASE_KEY", "")
+    return {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+
+
+def supabase_url() -> str:
+    return os.environ.get("SUPABASE_URL", "")
+
+
+def supabase_get(table: str, params: str = "") -> list[dict]:
+    url = f"{supabase_url()}/rest/v1/{table}?{params}" if params else f"{supabase_url()}/rest/v1/{table}"
+    resp = requests.get(url, headers=supabase_headers(), timeout=15)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def supabase_upsert(table: str, rows: list[dict], on_conflict: str = "") -> None:
+    if not rows:
+        return
+    headers = supabase_headers()
+    if on_conflict:
+        headers["Prefer"] = f"resolution=merge-duplicates,return=minimal"
+    url = f"{supabase_url()}/rest/v1/{table}"
+    if on_conflict:
+        url += f"?on_conflict={on_conflict}"
+    # Batch in chunks of 500
+    for i in range(0, len(rows), 500):
+        chunk = rows[i:i + 500]
+        resp = requests.post(url, headers=headers, json=chunk, timeout=30)
+        resp.raise_for_status()
+
+
+def supabase_update(table: str, match: dict, data: dict) -> None:
+    headers = supabase_headers()
+    headers["Prefer"] = "return=minimal"
+    params = "&".join(f"{k}=eq.{v}" for k, v in match.items())
+    url = f"{supabase_url()}/rest/v1/{table}?{params}"
+    resp = requests.patch(url, headers=headers, json=data, timeout=15)
+    resp.raise_for_status()
 
 
 # ---------------------------------------------------------------------------
@@ -72,7 +117,7 @@ def flatten_transaction(txn: dict, sync_time: str) -> dict:
         "transaction_id": txn.get("transaction_id", ""),
         "account_id": txn.get("account_id", ""),
         "date": txn.get("date", ""),
-        "authorized_date": txn.get("authorized_date") or "",
+        "authorized_date": txn.get("authorized_date") or None,
         "name": txn.get("name", ""),
         "merchant_name": txn.get("merchant_name") or "",
         "amount": txn.get("amount", 0),
@@ -89,9 +134,7 @@ def flatten_transaction(txn: dict, sync_time: str) -> dict:
 # Sync logic
 # ---------------------------------------------------------------------------
 
-def sync_transactions(base_url: str, client_id: str, secret: str, state: dict) -> tuple[list[dict], str]:
-    access_token = state["access_token"]
-    cursor = state.get("cursor", "")
+def sync_transactions(base_url: str, client_id: str, secret: str, access_token: str, cursor: str) -> tuple[list[dict], str]:
     sync_time = datetime.now(timezone.utc).isoformat()
 
     all_added: list[dict] = []
@@ -113,11 +156,7 @@ def sync_transactions(base_url: str, client_id: str, secret: str, state: dict) -
         all_added.extend(flatten_transaction(t, sync_time) for t in added)
         cursor = data.get("next_cursor", cursor)
         has_more = data.get("has_more", False)
-
-        if page == 1:
-            print(f"  Page {page}: {len(added)} added, has_more={has_more}")
-        else:
-            print(f"  Page {page}: {len(added)} added, has_more={has_more}")
+        print(f"  Page {page}: {len(added)} added, has_more={has_more}")
 
     return all_added, cursor
 
@@ -199,10 +238,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   <span class="sync-info" id="syncInfo"></span>
 </header>
 <main>
-  <!-- Summary cards -->
   <div class="cards" id="summaryCards"></div>
-
-  <!-- Charts -->
   <div class="charts">
     <div class="chart-card">
       <h2>Spending by Category (30d)</h2>
@@ -213,24 +249,18 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
       <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
     </div>
   </div>
-
-  <!-- Subscriptions -->
   <div class="section">
     <h2>Recurring / Subscriptions</h2>
     <div id="subscriptions"></div>
   </div>
-
-  <!-- Potential waste -->
   <div class="section">
     <h2>Potential Waste</h2>
     <div class="waste-list" id="wasteList"></div>
   </div>
-
-  <!-- Transaction table -->
   <div class="section">
     <h2>All Transactions</h2>
     <div class="controls">
-      <input type="text" id="searchBox" placeholder="Search merchant, category…">
+      <input type="text" id="searchBox" placeholder="Search merchant, category...">
       <select id="catFilter"><option value="">All categories</option></select>
       <select id="channelFilter"><option value="">All channels</option></select>
       <select id="monthFilter"><option value="">All months</option></select>
@@ -238,13 +268,13 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
     <table id="txTable">
       <thead>
         <tr>
-          <th data-col="date">Date <span class="sort-arrow">↕</span></th>
-          <th data-col="merchant_name">Merchant <span class="sort-arrow">↕</span></th>
-          <th data-col="name">Description <span class="sort-arrow">↕</span></th>
-          <th data-col="amount">Amount <span class="sort-arrow">↕</span></th>
-          <th data-col="category_primary">Category <span class="sort-arrow">↕</span></th>
-          <th data-col="payment_channel">Channel <span class="sort-arrow">↕</span></th>
-          <th data-col="pending">Status <span class="sort-arrow">↕</span></th>
+          <th data-col="date">Date <span class="sort-arrow"></span></th>
+          <th data-col="merchant_name">Merchant <span class="sort-arrow"></span></th>
+          <th data-col="name">Description <span class="sort-arrow"></span></th>
+          <th data-col="amount">Amount <span class="sort-arrow"></span></th>
+          <th data-col="category_primary">Category <span class="sort-arrow"></span></th>
+          <th data-col="payment_channel">Channel <span class="sort-arrow"></span></th>
+          <th data-col="pending">Status <span class="sort-arrow"></span></th>
         </tr>
       </thead>
       <tbody id="txBody"></tbody>
@@ -254,10 +284,8 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
 </main>
 
 <script>
-// ── Data injected by plaid_sync.py ──────────────────────────────────────────
 const TRANSACTIONS = __TRANSACTIONS_JSON__;
 const LAST_SYNC = "__LAST_SYNC__";
-// ────────────────────────────────────────────────────────────────────────────
 
 document.getElementById("syncInfo").textContent =
   LAST_SYNC ? "Last synced: " + new Date(LAST_SYNC).toLocaleString() : "No sync yet";
@@ -272,25 +300,21 @@ const txLast30 = TRANSACTIONS.filter(t => {
   return (now - d) <= ms30d && !t.pending && t.amount > 0;
 });
 
-// ── Summary cards ─────────────────────────────────────────────────────────
 (function buildCards() {
   const total30 = txLast30.reduce((s, t) => s + t.amount, 0);
   const avgTx = txLast30.length ? total30 / txLast30.length : 0;
   const catCounts = {};
   txLast30.forEach(t => { catCounts[t.category_primary] = (catCounts[t.category_primary] || 0) + t.amount; });
   const topCat = Object.entries(catCounts).sort((a,b) => b[1]-a[1])[0];
-
   const cards = [
     { label: "Spent (30 days)", value: fmtCurrency(total30), sub: `${txLast30.length} transactions` },
     { label: "Avg transaction", value: fmtCurrency(avgTx), sub: "Posted only" },
-    { label: "Top category", value: topCat ? topCat[0].replace(/_/g," ") : "—", sub: topCat ? fmtCurrency(topCat[1]) : "" },
+    { label: "Top category", value: topCat ? topCat[0].replace(/_/g," ") : "--", sub: topCat ? fmtCurrency(topCat[1]) : "" },
     { label: "Total transactions", value: TRANSACTIONS.length.toLocaleString(), sub: "All time" },
   ];
-  const el = document.getElementById("summaryCards");
-  el.innerHTML = cards.map(c => `<div class="card"><div class="label">${c.label}</div><div class="value">${c.value}</div><div class="sub">${c.sub}</div></div>`).join("");
+  document.getElementById("summaryCards").innerHTML = cards.map(c => `<div class="card"><div class="label">${c.label}</div><div class="value">${c.value}</div><div class="sub">${c.sub}</div></div>`).join("");
 })();
 
-// ── Category chart ────────────────────────────────────────────────────────
 (function buildCatChart() {
   const map = {};
   txLast30.forEach(t => { map[t.category_primary || "OTHER"] = (map[t.category_primary || "OTHER"] || 0) + t.amount; });
@@ -298,141 +322,73 @@ const txLast30 = TRANSACTIONS.filter(t => {
   const colors = ["#6c63ff","#ff6584","#43d98f","#ffbb28","#ff8042","#8dd1e1","#a4de6c","#d0ed57","#ffc658","#83a6ed"];
   new Chart(document.getElementById("catChart"), {
     type: "bar",
-    data: {
-      labels: sorted.map(([k]) => k.replace(/_/g," ")),
-      datasets: [{ data: sorted.map(([,v]) => v), backgroundColor: colors, borderRadius: 6 }]
-    },
+    data: { labels: sorted.map(([k]) => k.replace(/_/g," ")), datasets: [{ data: sorted.map(([,v]) => v), backgroundColor: colors, borderRadius: 6 }] },
     options: {
-      indexAxis: "y",
-      responsive: true, maintainAspectRatio: false,
+      indexAxis: "y", responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtCurrency(ctx.raw) } } },
-      scales: {
-        x: { ticks: { color: "#8b8fa8", callback: v => "$"+Math.round(v) }, grid: { color: "#2a2d3e" } },
-        y: { ticks: { color: "#e8eaf6" }, grid: { display: false } }
-      }
+      scales: { x: { ticks: { color: "#8b8fa8", callback: v => "$"+Math.round(v) }, grid: { color: "#2a2d3e" } }, y: { ticks: { color: "#e8eaf6" }, grid: { display: false } } }
     }
   });
 })();
 
-// ── Monthly trend ─────────────────────────────────────────────────────────
 (function buildTrendChart() {
   const map = {};
-  TRANSACTIONS.filter(t => !t.pending && t.amount > 0).forEach(t => {
-    const mo = t.date.slice(0, 7);
-    map[mo] = (map[mo] || 0) + t.amount;
-  });
+  TRANSACTIONS.filter(t => !t.pending && t.amount > 0).forEach(t => { const mo = t.date.slice(0,7); map[mo] = (map[mo]||0) + t.amount; });
   const months = Object.keys(map).sort();
   new Chart(document.getElementById("trendChart"), {
     type: "line",
-    data: {
-      labels: months,
-      datasets: [{
-        data: months.map(m => map[m]),
-        borderColor: "#6c63ff", backgroundColor: "rgba(108,99,255,.12)",
-        fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: "#6c63ff"
-      }]
-    },
+    data: { labels: months, datasets: [{ data: months.map(m => map[m]), borderColor: "#6c63ff", backgroundColor: "rgba(108,99,255,.12)", fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: "#6c63ff" }] },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtCurrency(ctx.raw) } } },
-      scales: {
-        x: { ticks: { color: "#8b8fa8" }, grid: { color: "#2a2d3e" } },
-        y: { ticks: { color: "#8b8fa8", callback: v => "$"+Math.round(v) }, grid: { color: "#2a2d3e" } }
-      }
+      scales: { x: { ticks: { color: "#8b8fa8" }, grid: { color: "#2a2d3e" } }, y: { ticks: { color: "#8b8fa8", callback: v => "$"+Math.round(v) }, grid: { color: "#2a2d3e" } } }
     }
   });
 })();
 
-// ── Subscription detector ─────────────────────────────────────────────────
 (function buildSubs() {
-  // Group by merchant, look for charges appearing in >= 2 distinct months
   const byMerchant = {};
-  TRANSACTIONS.filter(t => !t.pending && t.amount > 0).forEach(t => {
-    const key = (t.merchant_name || t.name).trim();
-    if (!byMerchant[key]) byMerchant[key] = [];
-    byMerchant[key].push(t);
-  });
-
+  TRANSACTIONS.filter(t => !t.pending && t.amount > 0).forEach(t => { const key = (t.merchant_name || t.name).trim(); if (!byMerchant[key]) byMerchant[key] = []; byMerchant[key].push(t); });
   const subs = [];
   for (const [merchant, txns] of Object.entries(byMerchant)) {
     const months = [...new Set(txns.map(t => t.date.slice(0,7)))];
     if (months.length >= 2) {
       const amounts = txns.map(t => t.amount);
       const avgAmt = amounts.reduce((s,a) => s+a, 0) / amounts.length;
-      const maxAmt = Math.max(...amounts);
-      const minAmt = Math.min(...amounts);
-      const consistent = (maxAmt - minAmt) / avgAmt < 0.1; // within 10%
-      if (consistent || avgAmt < 20) {
-        subs.push({ merchant, months: months.length, avgAmt, txns: txns.length, category: txns[0].category_primary });
-      }
+      const maxAmt = Math.max(...amounts); const minAmt = Math.min(...amounts);
+      const consistent = (maxAmt - minAmt) / avgAmt < 0.1;
+      if (consistent || avgAmt < 20) subs.push({ merchant, months: months.length, avgAmt, txns: txns.length, category: txns[0].category_primary });
     }
   }
   subs.sort((a,b) => b.avgAmt - a.avgAmt);
-
   const el = document.getElementById("subscriptions");
-  if (!subs.length) { el.innerHTML = '<div class="empty">No recurring charges detected yet — sync more data over multiple months.</div>'; return; }
-
-  el.innerHTML = `<table class="sub-table">
-    <thead><tr><th>Merchant</th><th>Category</th><th>Avg Amount</th><th>Months Active</th><th>Total Charges</th></tr></thead>
-    <tbody>${subs.map(s => `<tr>
-      <td><strong>${s.merchant}</strong></td>
-      <td><span class="badge badge-purple">${(s.category||"").replace(/_/g," ")}</span></td>
-      <td>${fmtCurrency(s.avgAmt)}</td>
-      <td>${s.months}</td>
-      <td>${s.txns}</td>
-    </tr>`).join("")}</tbody>
-  </table>`;
+  if (!subs.length) { el.innerHTML = '<div class="empty">No recurring charges detected yet.</div>'; return; }
+  el.innerHTML = `<table class="sub-table"><thead><tr><th>Merchant</th><th>Category</th><th>Avg Amount</th><th>Months</th><th>Charges</th></tr></thead><tbody>${subs.map(s => `<tr><td><strong>${s.merchant}</strong></td><td><span class="badge badge-purple">${(s.category||"").replace(/_/g," ")}</span></td><td>${fmtCurrency(s.avgAmt)}</td><td>${s.months}</td><td>${s.txns}</td></tr>`).join("")}</tbody></table>`;
 })();
 
-// ── Potential waste ───────────────────────────────────────────────────────
 (function buildWaste() {
   const waste = [];
-  // Pending transactions older than 5 days
-  TRANSACTIONS.filter(t => t.pending).forEach(t => {
-    const age = Math.round((now - new Date(t.date)) / 86400000);
-    if (age >= 5) waste.push({ name: t.merchant_name || t.name, detail: `Pending ${age} days · ${fmtCurrency(t.amount)}` });
-  });
-  // Small recurring (< $5, >= 2 months)
+  TRANSACTIONS.filter(t => t.pending).forEach(t => { const age = Math.round((now - new Date(t.date)) / 86400000); if (age >= 5) waste.push({ name: t.merchant_name || t.name, detail: `Pending ${age} days - ${fmtCurrency(t.amount)}` }); });
   const micro = {};
-  TRANSACTIONS.filter(t => !t.pending && t.amount > 0 && t.amount < 5).forEach(t => {
-    const key = (t.merchant_name || t.name).trim();
-    if (!micro[key]) micro[key] = new Set();
-    micro[key].add(t.date.slice(0,7));
-  });
-  for (const [name, months] of Object.entries(micro)) {
-    if (months.size >= 2) waste.push({ name, detail: `Small recurring · ${months.size} months` });
-  }
-
+  TRANSACTIONS.filter(t => !t.pending && t.amount > 0 && t.amount < 5).forEach(t => { const key = (t.merchant_name || t.name).trim(); if (!micro[key]) micro[key] = new Set(); micro[key].add(t.date.slice(0,7)); });
+  for (const [name, months] of Object.entries(micro)) { if (months.size >= 2) waste.push({ name, detail: `Small recurring - ${months.size} months` }); }
   const el = document.getElementById("wasteList");
   if (!waste.length) { el.innerHTML = '<div class="empty">No potential waste detected.</div>'; return; }
-  el.innerHTML = waste.slice(0, 20).map(w => `<div class="waste-item"><div class="w-name">${w.name}</div><div class="w-detail">${w.detail}</div></div>`).join("");
+  el.innerHTML = waste.slice(0,20).map(w => `<div class="waste-item"><div class="w-name">${w.name}</div><div class="w-detail">${w.detail}</div></div>`).join("");
 })();
 
-// ── Transaction table with sort, filter, pagination ───────────────────────
 (function buildTable() {
-  let filtered = [...TRANSACTIONS];
-  let sortCol = "date";
-  let sortDir = -1;
-  let page = 0;
-  const PAGE_SIZE = 50;
-
-  // Populate filters
+  let filtered = [...TRANSACTIONS]; let sortCol = "date"; let sortDir = -1; let page = 0; const PAGE_SIZE = 50;
   const cats = [...new Set(TRANSACTIONS.map(t => t.category_primary).filter(Boolean))].sort();
   const channels = [...new Set(TRANSACTIONS.map(t => t.payment_channel).filter(Boolean))].sort();
   const months = [...new Set(TRANSACTIONS.map(t => t.date.slice(0,7)).filter(Boolean))].sort().reverse();
-
-  const catSel = document.getElementById("catFilter");
-  const chSel = document.getElementById("channelFilter");
-  const moSel = document.getElementById("monthFilter");
-  cats.forEach(c => { const o = new Option(c.replace(/_/g," "), c); catSel.appendChild(o); });
-  channels.forEach(c => { const o = new Option(c, c); chSel.appendChild(o); });
-  months.forEach(m => { const o = new Option(m, m); moSel.appendChild(o); });
-
+  const catSel = document.getElementById("catFilter"); const chSel = document.getElementById("channelFilter"); const moSel = document.getElementById("monthFilter");
+  cats.forEach(c => catSel.appendChild(new Option(c.replace(/_/g," "), c)));
+  channels.forEach(c => chSel.appendChild(new Option(c, c)));
+  months.forEach(m => moSel.appendChild(new Option(m, m)));
   function applyFilters() {
     const q = document.getElementById("searchBox").value.toLowerCase();
-    const cat = catSel.value;
-    const ch = chSel.value;
-    const mo = moSel.value;
+    const cat = catSel.value; const ch = chSel.value; const mo = moSel.value;
     filtered = TRANSACTIONS.filter(t => {
       if (q && !(t.name + t.merchant_name + t.category_primary).toLowerCase().includes(q)) return false;
       if (cat && t.category_primary !== cat) return false;
@@ -440,77 +396,22 @@ const txLast30 = TRANSACTIONS.filter(t => {
       if (mo && !t.date.startsWith(mo)) return false;
       return true;
     });
-    page = 0;
-    render();
+    page = 0; render();
   }
-
-  function sortData() {
-    filtered.sort((a, b) => {
-      let av = a[sortCol], bv = b[sortCol];
-      if (sortCol === "amount") { av = +av; bv = +bv; }
-      if (av < bv) return -sortDir;
-      if (av > bv) return sortDir;
-      return 0;
-    });
-  }
-
+  function sortData() { filtered.sort((a, b) => { let av = a[sortCol], bv = b[sortCol]; if (sortCol === "amount") { av = +av; bv = +bv; } if (av < bv) return -sortDir; if (av > bv) return sortDir; return 0; }); }
   function render() {
-    sortData();
-    const total = filtered.length;
-    const start = page * PAGE_SIZE;
-    const slice = filtered.slice(start, start + PAGE_SIZE);
-
+    sortData(); const total = filtered.length; const start = page * PAGE_SIZE; const slice = filtered.slice(start, start + PAGE_SIZE);
     const body = document.getElementById("txBody");
-    if (!slice.length) {
-      body.innerHTML = `<tr><td colspan="7" class="empty">No transactions found.</td></tr>`;
-    } else {
-      body.innerHTML = slice.map(t => {
-        const amtClass = t.amount < 0 ? "amount-pos" : "amount-neg";
-        const amtDisplay = t.amount < 0 ? `+${fmtCurrency(-t.amount)}` : fmtCurrency(t.amount);
-        const status = t.pending
-          ? `<span class="badge badge-purple">Pending</span>`
-          : `<span class="badge badge-green">Posted</span>`;
-        return `<tr>
-          <td>${t.date}</td>
-          <td>${t.merchant_name || "—"}</td>
-          <td>${t.name}</td>
-          <td class="${amtClass}">${amtDisplay}</td>
-          <td>${(t.category_primary||"").replace(/_/g," ")}</td>
-          <td>${t.payment_channel || "—"}</td>
-          <td>${status}</td>
-        </tr>`;
-      }).join("");
-    }
-
-    // Pagination
+    if (!slice.length) { body.innerHTML = `<tr><td colspan="7" class="empty">No transactions found.</td></tr>`; }
+    else { body.innerHTML = slice.map(t => { const amtClass = t.amount < 0 ? "amount-pos" : "amount-neg"; const amtDisplay = t.amount < 0 ? `+${fmtCurrency(-t.amount)}` : fmtCurrency(t.amount); const status = t.pending ? `<span class="badge badge-purple">Pending</span>` : `<span class="badge badge-green">Posted</span>`; return `<tr><td>${t.date}</td><td>${t.merchant_name || "--"}</td><td>${t.name}</td><td class="${amtClass}">${amtDisplay}</td><td>${(t.category_primary||"").replace(/_/g," ")}</td><td>${t.payment_channel || "--"}</td><td>${status}</td></tr>`; }).join(""); }
     const pages = Math.ceil(total / PAGE_SIZE);
-    const pag = document.getElementById("pagination");
-    pag.innerHTML = `
-      <span>${total.toLocaleString()} transactions</span>
-      <button onclick="prevPage()" ${page === 0 ? "disabled" : ""}>← Prev</button>
-      <span>Page ${page+1} of ${Math.max(1,pages)}</span>
-      <button onclick="nextPage()" ${page >= pages-1 ? "disabled" : ""}>Next →</button>
-    `;
+    document.getElementById("pagination").innerHTML = `<span>${total.toLocaleString()} transactions</span><button onclick="prevPage()" ${page===0?"disabled":""}>Prev</button><span>Page ${page+1} of ${Math.max(1,pages)}</span><button onclick="nextPage()" ${page>=pages-1?"disabled":""}>Next</button>`;
   }
-
   window.prevPage = () => { if (page > 0) { page--; render(); } };
-  window.nextPage = () => { const pages = Math.ceil(filtered.length / PAGE_SIZE); if (page < pages-1) { page++; render(); } };
-
-  // Sort on header click
-  document.querySelectorAll("#txTable th[data-col]").forEach(th => {
-    th.addEventListener("click", () => {
-      const col = th.dataset.col;
-      if (sortCol === col) sortDir *= -1;
-      else { sortCol = col; sortDir = -1; }
-      render();
-    });
-  });
-
+  window.nextPage = () => { if (page < Math.ceil(filtered.length/PAGE_SIZE)-1) { page++; render(); } };
+  document.querySelectorAll("#txTable th[data-col]").forEach(th => { th.addEventListener("click", () => { const col = th.dataset.col; if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = -1; } render(); }); });
   document.getElementById("searchBox").addEventListener("input", applyFilters);
-  catSel.addEventListener("change", applyFilters);
-  chSel.addEventListener("change", applyFilters);
-  moSel.addEventListener("change", applyFilters);
-
+  catSel.addEventListener("change", applyFilters); chSel.addEventListener("change", applyFilters); moSel.addEventListener("change", applyFilters);
   render();
 })();
 </script>
@@ -519,11 +420,10 @@ const txLast30 = TRANSACTIONS.filter(t => {
 
 
 def build_dashboard(transactions: list[dict], last_sync: str) -> str:
-    html = DASHBOARD_TEMPLATE.replace(
+    return DASHBOARD_TEMPLATE.replace(
         "__TRANSACTIONS_JSON__",
         json.dumps(transactions, ensure_ascii=False),
     ).replace("__LAST_SYNC__", last_sync)
-    return html
 
 
 # ---------------------------------------------------------------------------
@@ -531,53 +431,56 @@ def build_dashboard(transactions: list[dict], last_sync: str) -> str:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    if not STATE_FILE.exists():
-        print("plaid_state.json not found. Run plaid_setup.py first.")
-        sys.exit(1)
-
-    state = json.loads(STATE_FILE.read_text())
-    if not state.get("access_token"):
-        print("No access_token in plaid_state.json. Run plaid_setup.py first.")
+    sb_url = supabase_url()
+    sb_key = os.environ.get("SUPABASE_KEY", "")
+    if not sb_url or not sb_key:
+        print("ERROR: SUPABASE_URL and SUPABASE_KEY must be set in .env")
         sys.exit(1)
 
     base_url = get_base_url()
     client_id, secret = load_credentials()
 
+    # Read token from Supabase
+    print("Reading access token from Supabase...")
+    tokens = supabase_get("plaid_tokens", "order=created_at.desc&limit=1")
+    if not tokens:
+        print("No access token found in Supabase. Connect your bank first.")
+        sys.exit(1)
+
+    token_row = tokens[0]
+    access_token = token_row["access_token"]
+    cursor = token_row.get("cursor") or ""
+    item_id = token_row.get("item_id", "")
+    print(f"  Using item: {item_id}")
+
+    # Sync from Plaid
     print("Syncing transactions from Plaid...")
-    new_txns, next_cursor = sync_transactions(base_url, client_id, secret, state)
+    new_txns, next_cursor = sync_transactions(base_url, client_id, secret, access_token, cursor)
     print(f"  Fetched {len(new_txns)} transaction(s) from API")
 
-    # Load existing transactions and deduplicate
-    existing: list[dict] = []
-    if TRANSACTIONS_FILE.exists():
-        existing = json.loads(TRANSACTIONS_FILE.read_text())
+    # Upsert to Supabase
+    if new_txns:
+        print("  Writing to Supabase...")
+        supabase_upsert("transactions", new_txns, on_conflict="transaction_id")
 
-    index = {t["transaction_id"]: t for t in existing}
-    added_count = 0
-    updated_count = 0
-    for txn in new_txns:
-        tid = txn["transaction_id"]
-        if tid in index:
-            updated_count += 1
-        else:
-            added_count += 1
-        index[tid] = txn
-
-    merged = sorted(index.values(), key=lambda t: t["date"], reverse=True)
-    TRANSACTIONS_FILE.write_text(json.dumps(merged, indent=2, ensure_ascii=False))
-    print(f"  {added_count} new, {updated_count} updated → {len(merged)} total in {TRANSACTIONS_FILE}")
-
-    # Persist updated cursor and sync time
+    # Update cursor
     last_sync = datetime.now(timezone.utc).isoformat()
-    state["cursor"] = next_cursor
-    state["last_sync"] = last_sync
-    STATE_FILE.write_text(json.dumps(state, indent=2))
+    supabase_update("plaid_tokens", {"item_id": item_id}, {
+        "cursor": next_cursor,
+        "last_sync": last_sync,
+    })
+
+    # Read all transactions for dashboard
+    print("  Fetching all transactions for dashboard...")
+    all_txns = supabase_get("transactions", "order=date.desc&limit=10000")
+    print(f"  {len(all_txns)} total transactions in database")
 
     # Regenerate dashboard
-    html = build_dashboard(merged, last_sync)
+    DASHBOARD_FILE.parent.mkdir(parents=True, exist_ok=True)
+    html = build_dashboard(all_txns, last_sync)
     DASHBOARD_FILE.write_text(html, encoding="utf-8")
     print(f"  Dashboard written to {DASHBOARD_FILE}")
-    print(f"\nDone. Open {DASHBOARD_FILE.resolve()} in your browser to view.")
+    print("\nDone.")
 
 
 if __name__ == "__main__":
