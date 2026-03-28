@@ -4,9 +4,10 @@
 # Plaid runtime state (contains access_token — never commit)
 plaid_state.json
 
-# Transaction data and generated dashboard (can contain sensitive financial data)
+# Transaction data (can contain sensitive financial data)
 transactions.json
-dashboard.html
+# Allow public/dashboard.html for Vercel hosting
+/dashboard.html
 
 # Python
 __pycache__/
