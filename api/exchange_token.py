@@ -47,7 +47,6 @@ class handler(BaseHTTPRequestHandler):
             self._json_response(400, {"error": "Missing public_token"})
             return
 
-        # Exchange public_token for access_token
         payload = json.dumps({
             "client_id": client_id,
             "secret": secret,
@@ -67,7 +66,6 @@ class handler(BaseHTTPRequestHandler):
             access_token = data["access_token"]
             item_id = data.get("item_id", "")
 
-            # Store in Supabase
             supabase_insert("plaid_tokens", {
                 "item_id": item_id,
                 "access_token": access_token,
