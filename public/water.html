@@ -76,6 +76,48 @@
   .mcl { font-size: 10px; color: var(--muted); }
   .mcl.warn { color: var(--yellow); }
   .mcl.over { color: var(--red); }
+  /* Report styles */
+  .report-controls { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 24px; }
+  .report-controls .form-group { min-width: 180px; }
+  #reportOutput { display: none; }
+  @media print {
+    header, .tabs, .report-controls, #reportOutput .no-print { display: none !important; }
+    body { background: #fff; color: #000; }
+    #reportOutput { display: block !important; }
+    .page { display: block !important; padding: 0; }
+    .rpt { max-width: 100%; }
+  }
+  .rpt { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 32px; }
+  .rpt-header { border-bottom: 2px solid var(--accent); padding-bottom: 20px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-start; }
+  .rpt-header h2 { font-size: 22px; font-weight: 700; color: var(--text); }
+  .rpt-header .rpt-meta { font-size: 12px; color: var(--muted); text-align: right; line-height: 1.8; }
+  .rpt-section { margin-bottom: 28px; }
+  .rpt-section h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--accent); font-weight: 600; margin-bottom: 14px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  .param-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+  .param-card { background: var(--surface2); border-radius: 8px; padding: 14px; border-left: 3px solid var(--border); }
+  .param-card.ok { border-left-color: var(--green); }
+  .param-card.warn { border-left-color: var(--yellow); }
+  .param-card.bad { border-left-color: var(--red); }
+  .param-card .pname { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .param-card .pval { font-size: 20px; font-weight: 700; }
+  .param-card.ok .pval { color: var(--green); }
+  .param-card.warn .pval { color: var(--yellow); }
+  .param-card.bad .pval { color: var(--red); }
+  .param-card .plimit { font-size: 10px; color: var(--muted); margin-top: 2px; }
+  .summary-box { padding: 16px; border-radius: 8px; margin-bottom: 16px; }
+  .summary-box.pass { background: rgba(34,197,94,.1); border: 1px solid rgba(34,197,94,.3); }
+  .summary-box.fail { background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.3); }
+  .summary-box.review { background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.3); }
+  .summary-box .verdict { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+  .summary-box.pass .verdict { color: var(--green); }
+  .summary-box.fail .verdict { color: var(--red); }
+  .summary-box.review .verdict { color: var(--yellow); }
+  .summary-box .detail { font-size: 13px; color: var(--muted); }
+  .rpt-history table { font-size: 12px; }
+  .rpt-footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
+  .generating { text-align: center; padding: 40px; color: var(--muted); }
+  .spinner { display: inline-block; width: 24px; height: 24px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; margin-bottom: 12px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -92,6 +134,7 @@
   <div class="tab active" onclick="showTab('dashboard')">Dashboard</div>
   <div class="tab" onclick="showTab('entry')">New Entry</div>
   <div class="tab" onclick="showTab('results')">All Results</div>
+  <div class="tab" onclick="showTab('report')">Generate Report</div>
 </div>
 
 <!-- DASHBOARD -->
@@ -210,6 +253,35 @@
       </div>
     </form>
   </div>
+</div>
+
+<!-- REPORT -->
+<div id="report" class="page">
+  <div class="report-controls">
+    <div class="form-group">
+      <label>Site</label>
+      <select id="rptSite" style="min-width:220px">
+        <option value="">All Sites</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>From</label>
+      <input type="date" id="rptFrom">
+    </div>
+    <div class="form-group">
+      <label>To</label>
+      <input type="date" id="rptTo">
+    </div>
+    <div class="form-group">
+      <label>&nbsp;</label>
+      <button class="btn btn-primary" onclick="generateReport()">⚡ Generate Report</button>
+    </div>
+    <div class="form-group">
+      <label>&nbsp;</label>
+      <button class="btn btn-outline no-print" id="printBtn" style="display:none" onclick="window.print()">🖨 Print / Save PDF</button>
+    </div>
+  </div>
+  <div id="reportOutput"></div>
 </div>
 
 <!-- ALL RESULTS -->
@@ -387,11 +459,196 @@ function resetForm() {
 }
 
 function showTab(name) {
-  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['dashboard','entry','results'][i]===name));
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['dashboard','entry','results','report'][i]===name));
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id===name));
 }
 
+// MCL limits for compliance checks
+const MCL = {
+  pH:            { min: 6.5, max: 8.5, label: 'MCL: 6.5–8.5', unit: '' },
+  turbidity:     { max: 1.0,           label: 'MCL: ≤1.0 NTU', unit: ' NTU' },
+  chlorine_free: { min: 0.2, max: 4.0, label: 'Range: 0.2–4.0 mg/L', unit: ' mg/L' },
+  nitrates:      { max: 10,            label: 'MCL: ≤10 mg/L', unit: ' mg/L' },
+  lead:          { max: 0.015,         label: 'Action: 0.015 mg/L', unit: ' mg/L' },
+  copper:        { max: 1.3,           label: 'Action: 1.3 mg/L', unit: ' mg/L' },
+};
+
+function checkParam(key, value) {
+  if (value == null) return 'na';
+  const m = MCL[key];
+  if (!m) return 'ok';
+  if (m.min !== undefined && value < m.min) return 'bad';
+  if (m.max !== undefined && value > m.max) return 'bad';
+  // warn if approaching limit (within 20%)
+  if (m.max !== undefined && value > m.max * 0.8) return 'warn';
+  return 'ok';
+}
+
+function paramCard(label, key, value) {
+  if (value == null) return '';
+  const status = checkParam(key, value);
+  const m = MCL[key] || {};
+  const unit = m.unit || '';
+  const limitLabel = m.label || '';
+  return `<div class="param-card ${status==='na'?'':''+status}">
+    <div class="pname">${label}</div>
+    <div class="pval">${value}${unit}</div>
+    <div class="plimit">${limitLabel}</div>
+  </div>`;
+}
+
+function overallVerdict(readings) {
+  if (readings.some(r => r.status === 'fail')) return 'fail';
+  if (readings.some(r => r.status === 'review')) return 'review';
+  if (readings.every(r => r.status === 'pass')) return 'pass';
+  return 'review';
+}
+
+function verdictText(v) {
+  return { pass: '✓ All Parameters Within Limits', fail: '✗ Violations Detected — Action Required', review: '⚠ Under Review — Resample Ordered' }[v] || '—';
+}
+
+function generateReport() {
+  const site = document.getElementById('rptSite').value;
+  const from = document.getElementById('rptFrom').value;
+  const to = document.getElementById('rptTo').value;
+  const out = document.getElementById('reportOutput');
+
+  out.style.display = 'block';
+  out.innerHTML = `<div class="generating"><div class="spinner"></div><br>Building compliance report...</div>`;
+  document.getElementById('printBtn').style.display = 'none';
+
+  setTimeout(() => {
+    let data = allReadings;
+    if (site) data = data.filter(r => r.site_name === site);
+    if (from) data = data.filter(r => r.sample_date >= from);
+    if (to)   data = data.filter(r => r.sample_date <= to);
+
+    if (!data.length) {
+      out.innerHTML = `<div class="generating">No readings found for the selected filters.</div>`;
+      return;
+    }
+
+    const sites = [...new Set(data.map(r => r.site_name))];
+    const verdict = overallVerdict(data);
+    const latest = data[0];
+    const dateRange = from || to ? `${from||'All'} – ${to||'Present'}` : 'All Dates';
+    const generated = new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
+
+    // violations list
+    const violations = [];
+    data.forEach(r => {
+      Object.keys(MCL).forEach(k => {
+        if (r[k] != null && checkParam(k, r[k]) === 'bad') {
+          violations.push({ date: r.sample_date, site: r.site_name, param: k, value: r[k] });
+        }
+      });
+      if (r.coliform_total === 'Present') violations.push({ date: r.sample_date, site: r.site_name, param: 'Total Coliform', value: 'Present' });
+      if (r.coliform_fecal === 'Present') violations.push({ date: r.sample_date, site: r.site_name, param: 'Fecal Coliform/E.coli', value: 'Present' });
+    });
+
+    // averages
+    function avg(key) {
+      const vals = data.map(r => r[key]).filter(v => v != null);
+      return vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(3)*1 : null;
+    }
+
+    const html = `<div class="rpt">
+      <div class="rpt-header">
+        <div>
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--accent);margin-bottom:6px">Water Quality Compliance Report</div>
+          <h2>${site || 'All Sites'}</h2>
+          <div style="font-size:13px;color:var(--muted);margin-top:4px">${dateRange} &nbsp;·&nbsp; ${data.length} sample${data.length!==1?'s':''}</div>
+        </div>
+        <div class="rpt-meta">
+          Generated: ${generated}<br>
+          Lab: ${latest.lab_name || 'Ascend'}<br>
+          Sites: ${sites.join(', ')}
+        </div>
+      </div>
+
+      <div class="rpt-section">
+        <h3>Overall Verdict</h3>
+        <div class="summary-box ${verdict}">
+          <div class="verdict">${verdictText(verdict)}</div>
+          <div class="detail">${violations.length === 0 ? 'No MCL exceedances detected in this reporting period.' : `${violations.length} exceedance${violations.length!==1?'s':''} detected. See violations section below.`}</div>
+        </div>
+      </div>
+
+      <div class="rpt-section">
+        <h3>Average Parameter Values</h3>
+        <div class="param-grid">
+          ${paramCard('pH', 'pH', avg('pH'))}
+          ${paramCard('Turbidity (NTU)', 'turbidity', avg('turbidity'))}
+          ${paramCard('Free Chlorine (mg/L)', 'chlorine_free', avg('chlorine_free'))}
+          ${paramCard('Total Chlorine (mg/L)', 'chlorine_total', avg('chlorine_total'))}
+          ${paramCard('Nitrates (mg/L)', 'nitrates', avg('nitrates'))}
+          ${paramCard('Lead (mg/L)', 'lead', avg('lead'))}
+          ${paramCard('Copper (mg/L)', 'copper', avg('copper'))}
+        </div>
+      </div>
+
+      ${violations.length ? `
+      <div class="rpt-section">
+        <h3>Violations &amp; Exceedances</h3>
+        <table>
+          <thead><tr><th>Date</th><th>Site</th><th>Parameter</th><th>Value</th><th>Action Required</th></tr></thead>
+          <tbody>${violations.map(v=>`<tr>
+            <td>${v.date}</td>
+            <td>${v.site}</td>
+            <td style="color:var(--red)">${v.param}</td>
+            <td style="color:var(--red);font-weight:600">${v.value}</td>
+            <td style="color:var(--muted)">Investigate source, resample within 24h, notify authority if required</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>` : ''}
+
+      <div class="rpt-section rpt-history">
+        <h3>Sample History</h3>
+        <table>
+          <thead><tr><th>Date</th><th>Site</th><th>pH</th><th>Turbidity</th><th>Free Cl₂</th><th>Coliform</th><th>Nitrates</th><th>Lead</th><th>Status</th><th>Notes</th></tr></thead>
+          <tbody>${data.map(r=>`<tr>
+            <td>${r.sample_date}</td>
+            <td>${r.site_name||'—'}</td>
+            <td>${r.pH??'—'}</td>
+            <td>${r.turbidity??'—'}</td>
+            <td>${r.chlorine_free??'—'}</td>
+            <td style="color:${r.coliform_total==='Present'?'var(--red)':'inherit'}">${r.coliform_total||'—'}</td>
+            <td>${r.nitrates??'—'}</td>
+            <td>${r.lead??'—'}</td>
+            <td>${badge(r.status)}</td>
+            <td style="color:var(--muted);font-size:11px">${r.notes||'—'}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>
+
+      <div class="rpt-footer">
+        <span>AquaTrack Water Quality Portal &nbsp;·&nbsp; Powered by Ascend Labs</span>
+        <span>Report generated ${generated} &nbsp;·&nbsp; Confidential</span>
+      </div>
+    </div>`;
+
+    out.innerHTML = html;
+    document.getElementById('printBtn').style.display = 'inline-flex';
+  }, 600);
+}
+
+async function initReportTab() {
+  const sites = await fetchSites();
+  const sel = document.getElementById('rptSite');
+  sites.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.name; opt.textContent = s.name;
+    sel.appendChild(opt);
+  });
+  // default date range: first of current month to today
+  const now = new Date();
+  document.getElementById('rptFrom').value = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+  document.getElementById('rptTo').value = now.toISOString().split('T')[0];
+}
+
 init();
+initReportTab();
 </script>
 </body>
 </html>
