@@ -31,51 +31,72 @@
 </div>
 
 <script>
+const SUPABASE_FN = "https://acouuzccqkcpyrckrgwg.supabase.co/functions/v1";
+const REDIRECT_URI = window.location.origin + window.location.pathname;
+
 const btn = document.getElementById("connectBtn");
 const status = document.getElementById("status");
+
+function createHandler(linkToken, isOAuth) {
+  const config = {
+    token: linkToken,
+    onSuccess: async (public_token, metadata) => {
+      status.innerHTML = '<span class="spinner"></span> Connecting your account...';
+      try {
+        const exRes = await fetch(`${SUPABASE_FN}/exchange-token`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ public_token }),
+        });
+        const exData = await exRes.json();
+        if (exData.success) {
+          sessionStorage.removeItem("link_token");
+          status.className = "status ok";
+          status.textContent = "✓ Bank connected successfully! You can close this tab.";
+          btn.textContent = "Connected ✓";
+        } else {
+          throw new Error(exData.error || "Exchange failed");
+        }
+      } catch (e) {
+        status.className = "status err";
+        status.textContent = "Error: " + e.message;
+        btn.disabled = false;
+      }
+    },
+    onExit: (err) => {
+      if (err) {
+        status.className = "status err";
+        status.textContent = "Error: " + (err.display_message || err.error_message || "Cancelled");
+      } else {
+        status.textContent = "";
+      }
+      btn.disabled = false;
+    },
+  };
+
+  // Required for OAuth institutions (Chase, Schwab, etc.)
+  if (isOAuth) {
+    config.receivedRedirectUri = window.location.href;
+  }
+
+  return Plaid.create(config);
+}
 
 async function startLink() {
   btn.disabled = true;
   status.className = "status";
-  status.innerHTML = '<span class="spinner"></span> Initializing Plaid Link...';
+  status.innerHTML = '<span class="spinner"></span> Initializing...';
 
   try {
-    const res = await fetch("/api/create_link_token", { method: "POST" });
+    const res = await fetch(`${SUPABASE_FN}/create-link-token`, { method: "POST" });
     const data = await res.json();
-    if (!data.link_token) throw new Error(data.error || "Failed to create link token");
+    if (!data.link_token) throw new Error(data.error || "Failed to get link token");
 
-    const handler = Plaid.create({
-      token: data.link_token,
-      onSuccess: async (public_token, metadata) => {
-        status.innerHTML = '<span class="spinner"></span> Connecting your account...';
-        try {
-          const exRes = await fetch("/api/exchange_token", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ public_token }),
-          });
-          const exData = await exRes.json();
-          if (exData.success) {
-            status.className = "status ok";
-            status.textContent = "Bank connected successfully! You can close this tab.";
-            btn.textContent = "Connected";
-          } else {
-            throw new Error(exData.error || "Exchange failed");
-          }
-        } catch (e) {
-          status.className = "status err";
-          status.textContent = "Error: " + e.message;
-          btn.disabled = false;
-        }
-      },
-      onExit: (err) => {
-        if (err) {
-          status.className = "status err";
-          status.textContent = "Link exited: " + (err.display_message || err.error_message || "cancelled");
-        }
-        btn.disabled = false;
-      },
-    });
+    // Store token for OAuth redirect flow
+    sessionStorage.setItem("link_token", data.link_token);
+
+    const handler = createHandler(data.link_token, false);
+    status.textContent = "";
     handler.open();
   } catch (e) {
     status.className = "status err";
@@ -83,6 +104,24 @@ async function startLink() {
     btn.disabled = false;
   }
 }
+
+// Handle OAuth redirect return (Chase, Schwab, etc.)
+// When bank redirects back, URL contains oauth_state_id
+window.addEventListener("load", () => {
+  const params = new URLSearchParams(window.location.search);
+  if (params.has("oauth_state_id")) {
+    const linkToken = sessionStorage.getItem("link_token");
+    if (linkToken) {
+      btn.disabled = true;
+      status.innerHTML = '<span class="spinner"></span> Completing bank connection...';
+      const handler = createHandler(linkToken, true);
+      handler.open();
+    } else {
+      status.className = "status err";
+      status.textContent = "Session expired. Please try connecting again.";
+    }
+  }
+});
 </script>
 </body>
 </html>
