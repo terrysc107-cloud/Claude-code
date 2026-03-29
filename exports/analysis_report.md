@@ -1,42 +1,62 @@
 ## Executive Summary
-Over the analyzed 90-day period (approximately January–March 2026), total outgoing spending across all categories reaches roughly **$97,000+** when including all withdrawals, transfers, and payments — though a significant portion represents inter-account transfers and investment contributions rather than pure consumption spending. True discretionary and household spending is estimated at approximately **$12,000–$15,000**. The account shows multiple income streams (payroll from Memorial ~$3,300–$3,600 bi-weekly, plus transfers from Aseptic Technica) alongside heavy credit card debt servicing, frequent peer-to-peer cash transfers via Apple Cash, and daily discretionary spending patterns that suggest cash flow is tight relative to obligations. A $414 interest charge on an Amex "Pay Over Time" balance is a significant red flag indicating revolving high-interest debt.
+Over the 90-day period (approximately January–March 2026), total outgoing spending across all categories reached an estimated **$87,000–$95,000+** when including loan payments, transfers, and daily expenses — significantly exceeding the identifiable income of roughly **$13,950** (from Memorial payroll and Aseptic Technica deposits). The account exhibits heavy reliance on frequent inter-account transfers (Apple Cash, Coinbase, M1, Schwab) and carries a substantial debt-service load across six or more active credit/loan accounts. Key concerns include **$414 in credit card interest charges**, duplicated transactions throughout the dataset suggesting possible data ingestion errors, and a notably high volume of food delivery and discretionary spending relative to documented income.
 
 ---
 
 ## Spending by Category
-> ⚠️ *Note: Many transactions appear duplicated in the data feed (same transaction listed twice). Figures below are de-duplicated estimates.*
 
-| Category | Est. Amount (90 days) | % of Spending | Notes |
-|---|---|---|---|
-| **Loan Payments / Debt Service** | ~$14,800 | ~34% | Capital One ($5,000), Apple Card ($3,808 + $239), AMEX ($514 + $46), Rocket Mortgage ($609), River. ($175×3), Loans 0002/0003 (~$817×2), Citi ($500+$41), Chase ($40), Barclays ($30), Capital One ($120) |
-| **Transfers Out (Apple Cash / P2P)** | ~$18,500 | ~43% | Large recurring Apple Cash sends: $2,500, $2,496, $2,400, $2,000, $1,450, $850, $799, $601, $299 — likely rent, shared expenses, or family support |
-| **Food & Drink** | ~$1,800 | ~4% | Uber Eats, Starbucks, restaurants (Little Horse Tavern, Sakura, Taqueria Amor, etc.) |
-| **General Merchandise** | ~$2,500 | ~6% | Amazon (~$1,200+), Walmart (~$760), Apple purchases, Five Below, Target, etc. |
-| **Transportation** | ~$1,100 | ~3% | Wawa fuel (~$400+), Uber rides (~$350+), EZ Pass ($200), Gas stations |
-| **Rent & Utilities** | ~$3,800 | ~9% | LTS Properties rent ($2,600), PGW gas ($449), PECO electric ($153), Verizon ($95) |
-| **Investments / Brokerage** | ~$1,750 | ~4% | Schwab ($250×3+$50×2), M1 Finance ($400×2+$100×3), Coinbase (~$25×20+ daily) |
-| **Home Improvement** | ~$2,500 | ~6% | Eastern Scaffolding ($1,485), Home Depot (~$950+), ADT ($61), Green & Main ($15) |
-| **Entertainment** | ~$310 | ~1% | YouTube Premium ($53), Netflix ($26), Disney+ ($25), Cobbs Creek Golf ($60+), The Cult ($80×2) |
-| **General Services / Insurance** | ~$1,200 | ~3% | State Farm ($223×2), New York Life ($173), Rocket Money ($6), Amazon Prime ($7), Car washes ($73), DM Delivery ($105) |
-| **Medical** | ~$180 | <1% | Virtua Health (multiple small charges), CVS, Children's HC, Doc Bresler's |
-| **Bank Fees / Interest** | ~$585 | ~1% | Amex interest ($414), Capital One interest ($117), Purchase interest charges ($40) |
-| **Crypto (Coinbase)** | ~$1,000 | ~2% | ~$25/day, nearly every day — habitual micro-purchases |
+> ⚠️ *Note: The transaction data contains numerous exact duplicates (same date, merchant, and amount). Figures below are calculated using **deduplicated** transactions to reflect actual spending.*
+
+| Category | Estimated Amount | % of Total Spend |
+|---|---|---|
+| **Loan Payments** | ~$14,150 | ~28.5% |
+| **Transfers Out** (Apple Cash, M1, Schwab, PayPal, Coinbase, Chase) | ~$13,200 | ~26.6% |
+| **General Merchandise** (Amazon, Walmart, Apple, Target, etc.) | ~$4,150 | ~8.4% |
+| **Food & Drink** (restaurants, delivery, groceries) | ~$3,800 | ~7.7% |
+| **Home Improvement** (Home Depot, Eastern Scaffolding, ADT) | ~$2,510 | ~5.1% |
+| **Transportation** (Wawa/gas, Uber, EZ Pass, Sunoco) | ~$2,300 | ~4.6% |
+| **Rent & Utilities** (PGW, PECO, Verizon, Rent transfer) | ~$3,890 | ~7.8% |
+| **General Services** (State Farm, New York Life, car wash, etc.) | ~$1,200 | ~2.4% |
+| **Entertainment** (Netflix, YouTube, Disney+, Golf) | ~$550 | ~1.1% |
+| **Medical** (Virtua Health, CVS, Children's Hospital) | ~$310 | ~0.6% |
+| **Bank Fees / Interest Charges** | ~$585 | ~1.2% |
+| **Other / Misc** (2nd Swing golf equipment, etc.) | ~$760 | ~1.5% |
+| **Government / Non-Profit** | ~$1,125 | ~2.3% |
+| **Personal Care** (LA Fitness, golf) | ~$55 | ~0.1% |
+
+**Total Estimated Outgoing (deduplicated): ~$48,600**
+**Total Identified Income (deduplicated): ~$13,950**
 
 ---
 
 ## Notable Transactions
 
-| Date | Transaction | Amount | Flag |
+| Date | Merchant | Amount | Flag |
 |---|---|---|---|
-| 2026-03-16 | Capital One credit card payment | $5,000 | 🔴 Very large — indicates substantial revolving balance |
-| 2026-03-16 | Apple Card payment | $3,808.78 | 🔴 Large credit card payoff — high utilization cycle |
-| 2026-03-25 | Amex interest charge ("Pay Over Time") | $414.32 | 🔴 **Critical** — this level of interest suggests a $6,000–$10,000+ revolving balance |
-| 2026-03-24 | Eastern Scaffolding | $1,485 | 🟡 Large one-time charge — home repair project underway |
-| 2026-03-20 | 2nd Swing (golf equipment) | $656.95 + $99.99 | 🟡 $757 spent on golf equipment — discretionary luxury |
-| 2026-03-23 | Apple Store | $634.94 | 🟡 Large electronics purchase — review necessity |
-| 2026-03-22 & 03-01 & 02-28 | Apple Cash sends of $2,500–$2,497 | $2,500 each | 🟡 Recurring large P2P — may be rent/family but needs clarity |
-| 2026-03-17 | Apple Cash send | $601.40 | 🟡 Unclear purpose |
-| 2026-03-17 | JPMorgan Chase transfer (Scott Advisory Group) | $2,000 | 🟡 Business account transfer — normal if self-employed |
-| 2026-03-10 | Capital One interest charge | $117 | 🟠 Interest on a second card |
-| 2026-03-23 | Walmart | $382.68 | 🟡 Large single Walmart purchase — review for non-essentials |
-| 2026-03-03 | Police and Fire FCU transfer | $1,124.88 | 🟡 External transfer — loan payment or savings, verify |
+| 2026-03-16 | Capital One (credit card payment) | **$5,000** | 🔴 Very large credit card payoff — suggests high revolving balance |
+| 2026-03-16 | Apple Card (GS Bank payment) | **$3,808.78** | 🔴 Large Apple Card payoff — high utilization concern |
+| 2026-03-22 | Apple Cash Sent | **$2,500** | 🔴 Unidentified recipient — review purpose |
+| 2026-03-01 | Apple Cash Sent | **$2,500** | 🔴 Recurring large unidentified transfer |
+| 2026-02-28 | Apple Cash Sent | **$2,496.98** | 🔴 Nearly identical to above — possible rent or undisclosed obligation |
+| 2026-03-24 | Eastern Scaffolding | **$1,485** | 🟡 Large one-time home improvement spend |
+| 2026-03-25 | Interest Charge on Pay Over Time | **$414.32** | 🔴 Very high interest charge — Amex Pay Over Time balance is significant |
+| 2026-03-20 | 2nd Swing Golf (Wilmington) | **$656.95 + $99.99** | 🟡 Discretionary large spend on golf equipment |
+| 2026-03-23 | Apple Store | **$634.94** | 🟡 Large electronics purchase |
+| 2026-03-03 | Police and Fire FCU transfer | **$1,124.88** | 🟡 Recurring — appears to be a loan/obligation payment, verify categorization |
+| 2026-03-25 | Interest Charge on Purchases | **$117** | 🔴 Additional interest charge on a separate card |
+| 2026-02-27 | Home Depot | **$806.17** | 🟡 Large home improvement spend — multiple Home Depot visits this period |
+| 2026-03-17 | JPMorgan Chase transfer | **$2,000** | 🟡 Transfer to "Scott Advisory Group LLC" — confirm business/personal separation |
+| 2026-03-24 | Uber (×4 same day) | **$60.40 combined** | 🟡 Four Uber rides in one day — unusually high usage |
+| 2026-02-24 | Acme Markets | **$332.78** | 🟡 Single large grocery run — may be bulk buy |
+
+---
+
+## Recurring Charges & Subscriptions
+
+| Merchant | Amount | Frequency | Category |
+|---|---|---|---|
+| Rocket Mortgage | $608.51 | Monthly | Mortgage |
+| Apple Card (GS Bank) | $239–$3,809 (varies) | Monthly | Credit card payment |
+| Capital One | $120–$5,000 (varies) | Monthly | Credit card payment |
+| Loan 0003 (Credit Union) | ~$633–$643 | Monthly | Loan payment |
+| Loan 0002 (Credit Union) | ~$174

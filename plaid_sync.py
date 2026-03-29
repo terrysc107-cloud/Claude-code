@@ -243,12 +243,54 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   .ai-body em { color: var(--muted); font-size: 12px; }
   .ai-body hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
   .ai-empty { color: var(--muted); font-size: 13px; font-style: italic; }
+  .header-actions { display: flex; gap: 8px; align-items: center; }
+  .btn { padding: 8px 14px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; border: none; transition: opacity .15s; }
+  .btn:hover { opacity: .8; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn-sync { background: var(--accent); color: #fff; }
+  .btn-export { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .btn-chat { background: var(--green); color: #0f1117; }
+  .chat-panel { position: fixed; right: 0; top: 0; height: 100vh; width: 420px; max-width: 100vw; background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; transform: translateX(100%); transition: transform .3s ease; z-index: 1000; box-shadow: -4px 0 24px rgba(0,0,0,.4); }
+  .chat-panel.open { transform: translateX(0); }
+  .chat-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  .chat-header h3 { font-size: 14px; font-weight: 600; color: var(--text); }
+  .chat-close { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 20px; line-height: 1; padding: 2px 6px; border-radius: 4px; }
+  .chat-close:hover { background: var(--surface2); color: var(--text); }
+  .chat-prompts { padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 6px; flex-shrink: 0; }
+  .prompt-chip { background: var(--surface2); border: 1px solid var(--border); color: var(--muted); border-radius: 20px; padding: 4px 10px; font-size: 11px; cursor: pointer; white-space: nowrap; }
+  .prompt-chip:hover { border-color: var(--accent); color: var(--accent); }
+  .chat-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 92%; padding: 10px 14px; border-radius: 12px; font-size: 13px; line-height: 1.65; word-break: break-word; }
+  .msg-user { background: var(--accent); color: #fff; align-self: flex-end; border-radius: 12px 12px 2px 12px; }
+  .msg-ai { background: var(--surface2); color: var(--text); align-self: flex-start; border-radius: 12px 12px 12px 2px; }
+  .msg-ai h2, .msg-ai h3 { font-size: 13px; font-weight: 700; color: var(--text); margin: 10px 0 4px; }
+  .msg-ai h2:first-child, .msg-ai h3:first-child { margin-top: 0; }
+  .msg-ai p { margin-bottom: 6px; color: var(--muted); }
+  .msg-ai ul, .msg-ai ol { margin: 4px 0 6px 16px; color: var(--muted); }
+  .msg-ai li { margin-bottom: 2px; }
+  .msg-ai table { border-collapse: collapse; width: 100%; font-size: 12px; margin: 8px 0; }
+  .msg-ai th { background: var(--bg); padding: 5px 8px; text-align: left; color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--border); }
+  .msg-ai td { padding: 5px 8px; border-top: 1px solid var(--border); color: var(--muted); }
+  .msg-ai strong { color: var(--text); font-weight: 600; }
+  .msg-ai code { background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 3px; font-family: monospace; font-size: 11px; }
+  .msg-ai hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+  .msg-thinking { color: var(--muted); font-style: italic; font-size: 12px; align-self: flex-start; padding: 10px 14px; }
+  .chat-input-row { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; flex-shrink: 0; }
+  .chat-input { flex: 1; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 8px 12px; font-size: 13px; outline: none; resize: none; min-height: 40px; max-height: 120px; font-family: inherit; }
+  .chat-input:focus { border-color: var(--accent); }
+  .chat-send { background: var(--accent); border: none; color: #fff; border-radius: 8px; padding: 8px 14px; cursor: pointer; font-size: 13px; font-weight: 600; align-self: flex-end; }
+  .chat-send:disabled { opacity: .4; cursor: default; }
 </style>
 </head>
 <body>
 <header>
   <h1>Financial Dashboard</h1>
-  <span class="sync-info" id="syncInfo"></span>
+  <div class="header-actions">
+    <span class="sync-info" id="syncInfo"></span>
+    <button class="btn btn-sync" onclick="syncNow()">&#x21BB; Sync</button>
+    <button class="btn btn-export" onclick="exportCSV()">&#x2193; Export CSV</button>
+    <button class="btn btn-chat" onclick="toggleChat()">&#x1F4AC; Ask AI</button>
+  </div>
 </header>
 <main>
   <div class="ai-section" id="aiSection" style="display:none">
@@ -450,7 +492,141 @@ const txLast30 = TRANSACTIONS.filter(t => {
   catSel.addEventListener("change", applyFilters); chSel.addEventListener("change", applyFilters); moSel.addEventListener("change", applyFilters);
   render();
 })();
+
+// ── Chat Panel ──────────────────────────────────────────────────────────────
+const SUPABASE_FN = "https://acouuzccqkcpyrckrgwg.supabase.co/functions/v1";
+let chatConversation = [];
+
+function toggleChat() {
+  document.getElementById("chatPanel").classList.toggle("open");
+}
+
+function handleChatKey(e) {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+}
+
+function sendPrompt(text) {
+  document.getElementById("chatInput").value = text;
+  sendMessage();
+  document.getElementById("chatPanel").classList.add("open");
+}
+
+function mdToHtml(md) {
+  return md
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/^### (.+)$/gm, "<h3>$1</h3>")
+    .replace(/^## (.+)$/gm, "<h2>$1</h2>")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/`(.+?)`/g, "<code>$1</code>")
+    .replace(/^[-*] (.+)$/gm, "<li>$1</li>")
+    .replace(/(<li>[\s\S]*?<\/li>\n?)+/g, m => `<ul>${m}</ul>`)
+    .replace(/^\|(.+)\|$/gm, m => {
+      const cells = m.split("|").filter((c, i, a) => i > 0 && i < a.length - 1);
+      return "<tr>" + cells.map(c => `<td>${c.trim()}</td>`).join("") + "</tr>";
+    })
+    .replace(/(<tr>[\s\S]*?<\/tr>\n?)+/g, m => {
+      const rows = m.trim().split(/\n/).filter(r => r.includes("<tr>") && !r.includes("---"));
+      if (!rows.length) return m;
+      const [head, ...body] = rows;
+      const th = head.replace(/<td>/g, "<th>").replace(/<\/td>/g, "</th>");
+      return `<table><thead>${th}</thead><tbody>${body.join("")}</tbody></table>`;
+    })
+    .replace(/^---$/gm, "<hr>")
+    .replace(/\n\n/g, "<br>")
+    .replace(/^(?!<[htulbco])(.*\S.*)$/gm, "<p>$1</p>")
+    .replace(/<p><\/p>/g, "");
+}
+
+async function sendMessage() {
+  const input = document.getElementById("chatInput");
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = "";
+  const msgs = document.getElementById("chatMessages");
+  msgs.innerHTML += `<div class="msg msg-user">${msg.replace(/</g,"&lt;")}</div>`;
+  const thinkId = "think_" + Date.now();
+  msgs.innerHTML += `<div class="msg msg-thinking" id="${thinkId}">Thinking...</div>`;
+  msgs.scrollTop = msgs.scrollHeight;
+  document.getElementById("chatSend").disabled = true;
+  try {
+    const res = await fetch(`${SUPABASE_FN}/finance-chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: msg, conversation: chatConversation }),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    chatConversation.push({ role: "user", content: msg });
+    chatConversation.push({ role: "assistant", content: data.reply });
+    if (chatConversation.length > 20) chatConversation = chatConversation.slice(-20);
+    document.getElementById(thinkId).outerHTML = `<div class="msg msg-ai">${mdToHtml(data.reply)}</div>`;
+  } catch(e) {
+    document.getElementById(thinkId).outerHTML = `<div class="msg msg-ai" style="color:var(--red)">Error: ${e.message}</div>`;
+  }
+  document.getElementById("chatSend").disabled = false;
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+// ── Sync ─────────────────────────────────────────────────────────────────────
+async function syncNow() {
+  const btn = document.querySelector(".btn-sync");
+  btn.textContent = "Syncing...";
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${SUPABASE_FN}/plaid-sync`, { method: "POST" });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    if (data.new_count > 0) {
+      btn.textContent = `✓ ${data.new_count} new — reloading`;
+      setTimeout(() => location.reload(), 1500);
+    } else {
+      btn.textContent = "✓ Up to date";
+      setTimeout(() => { btn.textContent = "↻ Sync"; btn.disabled = false; }, 2500);
+    }
+  } catch(e) {
+    btn.textContent = "✗ Failed";
+    btn.style.background = "var(--red)";
+    setTimeout(() => { btn.textContent = "↻ Sync"; btn.disabled = false; btn.style.background = ""; }, 3000);
+  }
+}
+
+// ── Export CSV ───────────────────────────────────────────────────────────────
+function exportCSV() {
+  const cols = ["date","merchant_name","name","amount","category_primary","payment_channel","pending","account_id"];
+  const escape = v => {
+    const s = String(v ?? "");
+    return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g,'""')}"` : s;
+  };
+  const rows = [cols.join(","), ...TRANSACTIONS.map(t => cols.map(c => escape(t[c])).join(","))];
+  const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `transactions_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
 </script>
+
+<div class="chat-panel" id="chatPanel">
+  <div class="chat-header">
+    <h3>&#x1F4AC; Finance AI</h3>
+    <button class="chat-close" onclick="toggleChat()">&#x2715;</button>
+  </div>
+  <div class="chat-prompts">
+    <span class="prompt-chip" onclick="sendPrompt('Summarize my spending this month')">This month</span>
+    <span class="prompt-chip" onclick="sendPrompt('Generate a Q1 2026 P&amp;L review with income and expenses')">Q1 P&amp;L</span>
+    <span class="prompt-chip" onclick="sendPrompt('List all my recurring subscriptions with amounts')">Subscriptions</span>
+    <span class="prompt-chip" onclick="sendPrompt('Compare my spending across the last 3 months')">3-month trend</span>
+    <span class="prompt-chip" onclick="sendPrompt('What are my top 10 merchants by total spending?')">Top merchants</span>
+    <span class="prompt-chip" onclick="sendPrompt('Find any unusual or unexpectedly large transactions')">Unusual charges</span>
+    <span class="prompt-chip" onclick="sendPrompt('Where can I cut spending to save more money?')">Save money</span>
+  </div>
+  <div class="chat-messages" id="chatMessages"></div>
+  <div class="chat-input-row">
+    <textarea class="chat-input" id="chatInput" placeholder="Ask anything about your finances..." onkeydown="handleChatKey(event)" rows="1"></textarea>
+    <button class="chat-send" id="chatSend" onclick="sendMessage()">Send</button>
+  </div>
+</div>
+
 </body>
 </html>"""
 
