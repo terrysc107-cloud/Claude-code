@@ -17,6 +17,7 @@ from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
+from plaid_analyze import analyze_transactions
 
 load_dotenv()
 
@@ -230,6 +231,18 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   .pagination button { background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 12px; }
   .pagination button:disabled { opacity: .4; cursor: default; }
   .pagination span { font-size: 12px; color: var(--muted); }
+  .ai-section { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 12px; padding: 24px 28px; margin-bottom: 24px; }
+  .ai-section h2 { font-size: 13px; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+  .ai-section .ai-badge { background: rgba(108,99,255,.15); color: var(--accent); font-size: 10px; padding: 2px 8px; border-radius: 20px; font-weight: 600; }
+  .ai-body h2 { font-size: 15px; font-weight: 700; color: var(--text); margin: 20px 0 8px; text-transform: none; letter-spacing: 0; }
+  .ai-body h2:first-child { margin-top: 0; }
+  .ai-body p { font-size: 14px; color: var(--muted); line-height: 1.7; margin-bottom: 10px; }
+  .ai-body ul, .ai-body ol { margin: 8px 0 10px 20px; }
+  .ai-body li { font-size: 14px; color: var(--muted); line-height: 1.7; margin-bottom: 4px; }
+  .ai-body strong { color: var(--text); font-weight: 600; }
+  .ai-body em { color: var(--muted); font-size: 12px; }
+  .ai-body hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+  .ai-empty { color: var(--muted); font-size: 13px; font-style: italic; }
 </style>
 </head>
 <body>
@@ -238,6 +251,10 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   <span class="sync-info" id="syncInfo"></span>
 </header>
 <main>
+  <div class="ai-section" id="aiSection" style="display:none">
+    <h2>AI Analysis <span class="ai-badge">Claude</span></h2>
+    <div class="ai-body" id="aiBody"></div>
+  </div>
   <div class="cards" id="summaryCards"></div>
   <div class="charts">
     <div class="chart-card">
@@ -286,6 +303,25 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
 <script>
 const TRANSACTIONS = __TRANSACTIONS_JSON__;
 const LAST_SYNC = "__LAST_SYNC__";
+const AI_ANALYSIS = `__AI_ANALYSIS__`;
+
+// Render AI analysis section
+(function renderAnalysis() {
+  if (!AI_ANALYSIS.trim()) return;
+  document.getElementById("aiSection").style.display = "";
+  // Simple markdown → HTML (handles ## headings, **bold**, *em*, - lists, hr, paragraphs)
+  const html = AI_ANALYSIS
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/^## (.+)$/gm, "<h2>$1</h2>")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/^---$/gm, "<hr>")
+    .replace(/^[-*] (.+)$/gm, "<li>$1</li>")
+    .replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`)
+    .replace(/^(?!<[h|u|l|h|e])(.*\S.*)$/gm, "<p>$1</p>")
+    .replace(/<p><\/p>/g, "");
+  document.getElementById("aiBody").innerHTML = html;
+})();
 
 document.getElementById("syncInfo").textContent =
   LAST_SYNC ? "Last synced: " + new Date(LAST_SYNC).toLocaleString() : "No sync yet";
@@ -419,11 +455,14 @@ const txLast30 = TRANSACTIONS.filter(t => {
 </html>"""
 
 
-def build_dashboard(transactions: list[dict], last_sync: str) -> str:
+def build_dashboard(transactions: list[dict], last_sync: str, analysis: str = "") -> str:
     return DASHBOARD_TEMPLATE.replace(
         "__TRANSACTIONS_JSON__",
         json.dumps(transactions, ensure_ascii=False),
-    ).replace("__LAST_SYNC__", last_sync)
+    ).replace("__LAST_SYNC__", last_sync).replace(
+        "__AI_ANALYSIS__",
+        analysis.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${") if analysis else "",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -477,9 +516,17 @@ def main() -> None:
     all_txns = supabase_get("transactions", "order=date.desc&limit=10000")
     print(f"  {len(all_txns)} total transactions in database")
 
+    # Generate AI analysis
+    print("\nGenerating AI financial analysis...")
+    analysis = analyze_transactions(all_txns)
+    if analysis:
+        Path("exports").mkdir(exist_ok=True)
+        Path("exports/analysis_report.md").write_text(analysis, encoding="utf-8")
+        print("  Analysis saved to exports/analysis_report.md")
+
     # Regenerate dashboard
     DASHBOARD_FILE.parent.mkdir(parents=True, exist_ok=True)
-    html = build_dashboard(all_txns, last_sync)
+    html = build_dashboard(all_txns, last_sync, analysis)
     DASHBOARD_FILE.write_text(html, encoding="utf-8")
     print(f"  Dashboard written to {DASHBOARD_FILE}")
     print("\nDone.")
