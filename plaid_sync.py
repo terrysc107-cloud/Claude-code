@@ -359,7 +359,7 @@ const AI_ANALYSIS = `__AI_ANALYSIS__`;
     .replace(/\*(.+?)\*/g, "<em>$1</em>")
     .replace(/^---$/gm, "<hr>")
     .replace(/^[-*] (.+)$/gm, "<li>$1</li>")
-    .replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`)
+    .replace(/(<li>.*<\/li>)+/g, m => `<ul>${m}</ul>`)
     .replace(/^(?!<[h|u|l|h|e])(.*\S.*)$/gm, "<p>$1</p>")
     .replace(/<p><\/p>/g, "");
   document.getElementById("aiBody").innerHTML = html;
@@ -519,20 +519,20 @@ function mdToHtml(md) {
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
     .replace(/`(.+?)`/g, "<code>$1</code>")
     .replace(/^[-*] (.+)$/gm, "<li>$1</li>")
-    .replace(/(<li>[\s\S]*?<\/li>\n?)+/g, m => `<ul>${m}</ul>`)
+    .replace(/(<li>[\s\S]*?<\/li>)+/g, m => `<ul>${m}</ul>`)
     .replace(/^\|(.+)\|$/gm, m => {
       const cells = m.split("|").filter((c, i, a) => i > 0 && i < a.length - 1);
       return "<tr>" + cells.map(c => `<td>${c.trim()}</td>`).join("") + "</tr>";
     })
-    .replace(/(<tr>[\s\S]*?<\/tr>\n?)+/g, m => {
-      const rows = m.trim().split(/\n/).filter(r => r.includes("<tr>") && !r.includes("---"));
+    .replace(/(<tr>[\s\S]*?<\/tr>)+/g, m => {
+      const rows = m.trim().split("</tr>").filter(r => r.includes("<tr>") && !r.includes("---")).map(r => r + "</tr>");
       if (!rows.length) return m;
       const [head, ...body] = rows;
       const th = head.replace(/<td>/g, "<th>").replace(/<\/td>/g, "</th>");
       return `<table><thead>${th}</thead><tbody>${body.join("")}</tbody></table>`;
     })
     .replace(/^---$/gm, "<hr>")
-    .replace(/\n\n/g, "<br>")
+    .replace(/\\n\\n/g, "<br>")
     .replace(/^(?!<[htulbco])(.*\S.*)$/gm, "<p>$1</p>")
     .replace(/<p><\/p>/g, "");
 }
@@ -595,10 +595,10 @@ function exportCSV() {
   const cols = ["date","merchant_name","name","amount","category_primary","payment_channel","pending","account_id"];
   const escape = v => {
     const s = String(v ?? "");
-    return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g,'""')}"` : s;
+    return s.includes(",") || s.includes('"') ? `"${s.replace(/"/g,'""')}"` : s;
   };
   const rows = [cols.join(","), ...TRANSACTIONS.map(t => cols.map(c => escape(t[c])).join(","))];
-  const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+  const blob = new Blob([rows.join("\\n")], { type: "text/csv" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = `transactions_${new Date().toISOString().slice(0,10)}.csv`;
