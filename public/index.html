@@ -74,6 +74,7 @@ function createHandler(linkToken, isOAuth) {
     },
   };
 
+  // Required for OAuth institutions (Chase, Schwab, etc.)
   if (isOAuth) {
     config.receivedRedirectUri = window.location.href;
   }
@@ -91,7 +92,9 @@ async function startLink() {
     const data = await res.json();
     if (!data.link_token) throw new Error(data.error || "Failed to get link token");
 
+    // Store token for OAuth redirect flow
     sessionStorage.setItem("link_token", data.link_token);
+
     const handler = createHandler(data.link_token, false);
     status.textContent = "";
     handler.open();
@@ -102,6 +105,8 @@ async function startLink() {
   }
 }
 
+// Handle OAuth redirect return (Chase, Schwab, etc.)
+// When bank redirects back, URL contains oauth_state_id
 window.addEventListener("load", () => {
   const params = new URLSearchParams(window.location.search);
   if (params.has("oauth_state_id")) {

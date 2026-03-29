@@ -440,35 +440,37 @@ def main() -> None:
     base_url = get_base_url()
     client_id, secret = load_credentials()
 
-    # Read token from Supabase
-    print("Reading access token from Supabase...")
-    tokens = supabase_get("plaid_tokens", "order=created_at.desc&limit=1")
+    # Read ALL tokens from Supabase
+    print("Reading access tokens from Supabase...")
+    tokens = supabase_get("plaid_tokens", "order=created_at.asc")
     if not tokens:
         print("No access token found in Supabase. Connect your bank first.")
         sys.exit(1)
 
-    token_row = tokens[0]
-    access_token = token_row["access_token"]
-    cursor = token_row.get("cursor") or ""
-    item_id = token_row.get("item_id", "")
-    print(f"  Using item: {item_id}")
-
-    # Sync from Plaid
-    print("Syncing transactions from Plaid...")
-    new_txns, next_cursor = sync_transactions(base_url, client_id, secret, access_token, cursor)
-    print(f"  Fetched {len(new_txns)} transaction(s) from API")
-
-    # Upsert to Supabase
-    if new_txns:
-        print("  Writing to Supabase...")
-        supabase_upsert("transactions", new_txns, on_conflict="transaction_id")
-
-    # Update cursor
+    print(f"  Found {len(tokens)} connected account(s)")
+    total_new = 0
     last_sync = datetime.now(timezone.utc).isoformat()
-    supabase_update("plaid_tokens", {"item_id": item_id}, {
-        "cursor": next_cursor,
-        "last_sync": last_sync,
-    })
+
+    # Sync each connected account
+    for token_row in tokens:
+        access_token = token_row["access_token"]
+        cursor = token_row.get("cursor") or ""
+        item_id = token_row.get("item_id", "")
+        print(f"\nSyncing item: {item_id}")
+
+        new_txns, next_cursor = sync_transactions(base_url, client_id, secret, access_token, cursor)
+        print(f"  Fetched {len(new_txns)} transaction(s)")
+        total_new += len(new_txns)
+
+        if new_txns:
+            supabase_upsert("transactions", new_txns, on_conflict="transaction_id")
+
+        supabase_update("plaid_tokens", {"item_id": item_id}, {
+            "cursor": next_cursor,
+            "last_sync": last_sync,
+        })
+
+    print(f"\nTotal new transactions across all accounts: {total_new}")
 
     # Read all transactions for dashboard
     print("  Fetching all transactions for dashboard...")
