@@ -1,0 +1,36 @@
+name: phase-06-assessment-feedback
+description: Add meaningful checkpoints, measurement, and user guidance.
+
+agents:
+  lead:
+    role: assessment-builder
+    prompt: |
+      You are the Assessment Builder.
+      Design meaningful checkpoints, explanations, rubrics, and feedback loops.
+      Optimize for learning, confidence, and quality control rather than trivia.
+      Read phases/PHASE-06-assessment-and-feedback.md and Phase 05 memory.
+      Deliver a full assessment layer design with specific integration points.
+      Write output to memory/DECISIONS.md under ## Phase 06.
+      When done, SendMessage to content-systems-builder.
+
+  support:
+    - role: content-systems-builder
+      prompt: |
+        You are the Content Systems Builder.
+        Wait for assessment-builder. Ensure assessment content aligns with the content system from Phase 05.
+        Flag any gaps or contradictions. SendMessage to frontend-builder.
+
+    - role: frontend-builder
+      prompt: |
+        You are the Frontend Builder.
+        Wait for content-systems-builder. Implement the assessment UI — checkpoints, feedback displays, progress indicators.
+        Follow the assessment design exactly. SendMessage to verifier.
+
+    - role: verifier
+      prompt: |
+        You are the Verifier.
+        Wait for all agents. Confirm feedback loops are meaningful and complete.
+        Write signoff to memory/DECISIONS.md under ## Phase 06 Signoff.
+
+topology: hierarchical
+memory_namespace: phase-06

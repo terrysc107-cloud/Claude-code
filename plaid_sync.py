@@ -80,6 +80,18 @@ def supabase_update(table: str, match: dict, data: dict) -> None:
     resp.raise_for_status()
 
 
+def supabase_delete(table: str, ids: list[str], id_col: str = "transaction_id") -> None:
+    if not ids:
+        return
+    headers = supabase_headers()
+    headers["Prefer"] = "return=minimal"
+    # PostgREST IN filter: col=in.(a,b,c)
+    values = ",".join(ids)
+    url = f"{supabase_url()}/rest/v1/{table}?{id_col}=in.({values})"
+    resp = requests.delete(url, headers=headers, timeout=30)
+    resp.raise_for_status()
+
+
 # ---------------------------------------------------------------------------
 # Plaid helpers
 # ---------------------------------------------------------------------------
@@ -135,31 +147,37 @@ def flatten_transaction(txn: dict, sync_time: str) -> dict:
 # Sync logic
 # ---------------------------------------------------------------------------
 
-def sync_transactions(base_url: str, client_id: str, secret: str, access_token: str, cursor: str) -> tuple[list[dict], str]:
+def sync_transactions(
+    base_url: str, client_id: str, secret: str, access_token: str, cursor: str
+) -> tuple[list[dict], list[dict], list[str], str]:
     sync_time = datetime.now(timezone.utc).isoformat()
 
     all_added: list[dict] = []
+    all_modified: list[dict] = []
+    all_removed_ids: list[str] = []
     has_more = True
     page = 0
 
     while has_more:
         page += 1
-        payload: dict = {
-            "client_id": client_id,
-            "secret": secret,
-            "access_token": access_token,
-        }
+        payload: dict = {"client_id": client_id, "secret": secret, "access_token": access_token}
         if cursor:
             payload["cursor"] = cursor
 
         data = plaid_post(base_url, "/transactions/sync", payload)
         added = data.get("added", [])
+        modified = data.get("modified", [])
+        removed = data.get("removed", [])
+
         all_added.extend(flatten_transaction(t, sync_time) for t in added)
+        all_modified.extend(flatten_transaction(t, sync_time) for t in modified)
+        all_removed_ids.extend(r["transaction_id"] for r in removed if r.get("transaction_id"))
+
         cursor = data.get("next_cursor", cursor)
         has_more = data.get("has_more", False)
-        print(f"  Page {page}: {len(added)} added, has_more={has_more}")
+        print(f"  Page {page}: {len(added)} added, {len(modified)} modified, {len(removed)} removed, has_more={has_more}")
 
-    return all_added, cursor
+    return all_added, all_modified, all_removed_ids, cursor
 
 
 # ---------------------------------------------------------------------------
@@ -175,16 +193,16 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
   :root {
-    --bg: #0f1117;
-    --surface: #1a1d27;
-    --surface2: #22263a;
-    --accent: #6c63ff;
-    --accent2: #ff6584;
-    --text: #e8eaf6;
-    --muted: #8b8fa8;
-    --green: #43d98f;
-    --red: #ff6584;
-    --border: #2a2d3e;
+    --bg: #1C1714;
+    --surface: #262220;
+    --surface2: #302B28;
+    --accent: #DA7756;
+    --accent2: #C05746;
+    --text: #F5EDE6;
+    --muted: #9E8E84;
+    --green: #5ABF8A;
+    --red: #E06060;
+    --border: #3D3530;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
@@ -215,9 +233,9 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   td { padding: 10px 14px; border-top: 1px solid var(--border); font-size: 13px; }
   tr:hover td { background: var(--surface2); }
   .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
-  .badge-green { background: rgba(67,217,143,.15); color: var(--green); }
-  .badge-red { background: rgba(255,101,132,.15); color: var(--red); }
-  .badge-purple { background: rgba(108,99,255,.15); color: var(--accent); }
+  .badge-green { background: rgba(90,191,138,.15); color: var(--green); }
+  .badge-red { background: rgba(224,96,96,.15); color: var(--red); }
+  .badge-purple { background: rgba(218,119,86,.15); color: var(--accent); }
   .amount-neg { color: var(--red); }
   .amount-pos { color: var(--green); }
   .sub-table { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
@@ -233,7 +251,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   .pagination span { font-size: 12px; color: var(--muted); }
   .ai-section { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 12px; padding: 24px 28px; margin-bottom: 24px; }
   .ai-section h2 { font-size: 13px; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
-  .ai-section .ai-badge { background: rgba(108,99,255,.15); color: var(--accent); font-size: 10px; padding: 2px 8px; border-radius: 20px; font-weight: 600; }
+  .ai-section .ai-badge { background: rgba(218,119,86,.15); color: var(--accent); font-size: 10px; padding: 2px 8px; border-radius: 20px; font-weight: 600; }
   .ai-body h2 { font-size: 15px; font-weight: 700; color: var(--text); margin: 20px 0 8px; text-transform: none; letter-spacing: 0; }
   .ai-body h2:first-child { margin-top: 0; }
   .ai-body p { font-size: 14px; color: var(--muted); line-height: 1.7; margin-bottom: 10px; }
@@ -243,6 +261,10 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   .ai-body em { color: var(--muted); font-size: 12px; }
   .ai-body hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
   .ai-empty { color: var(--muted); font-size: 13px; font-style: italic; }
+  .range-chips { display: flex; gap: 6px; margin-bottom: 16px; }
+  .range-chip { background: var(--surface); border: 1px solid var(--border); color: var(--muted); border-radius: 20px; padding: 5px 14px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s; }
+  .range-chip:hover { border-color: var(--accent); color: var(--accent); }
+  .range-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
   .header-actions { display: flex; gap: 8px; align-items: center; }
   .btn { padding: 8px 14px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; border: none; transition: opacity .15s; }
   .btn:hover { opacity: .8; }
@@ -250,7 +272,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   .btn-sync { background: var(--accent); color: #fff; }
   .btn-export { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
   .btn-chat { background: var(--green); color: #0f1117; }
-  .chat-panel { position: fixed; right: 0; top: 0; height: 100vh; width: 420px; max-width: 100vw; background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; transform: translateX(100%); transition: transform .3s ease; z-index: 1000; box-shadow: -4px 0 24px rgba(0,0,0,.4); }
+  .chat-panel { position: fixed; right: 0; top: 0; height: 100vh; width: min(420px, 100vw); background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; transform: translateX(100%); transition: transform .3s ease; z-index: 1000; box-shadow: -4px 0 24px rgba(0,0,0,.4); }
   .chat-panel.open { transform: translateX(0); }
   .chat-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
   .chat-header h3 { font-size: 14px; font-weight: 600; color: var(--text); }
@@ -297,10 +319,16 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
     <h2>AI Analysis <span class="ai-badge">Claude</span></h2>
     <div class="ai-body" id="aiBody"></div>
   </div>
+  <div class="range-chips" id="rangeChips">
+    <button class="range-chip" data-days="7" onclick="setRange(7)">7 days</button>
+    <button class="range-chip active" data-days="30" onclick="setRange(30)">30 days</button>
+    <button class="range-chip" data-days="90" onclick="setRange(90)">90 days</button>
+    <button class="range-chip" data-days="0" onclick="setRange(0)">All time</button>
+  </div>
   <div class="cards" id="summaryCards"></div>
   <div class="charts">
     <div class="chart-card">
-      <h2>Spending by Category (30d)</h2>
+      <h2 id="catChartTitle">Spending by Category (30d)</h2>
       <div class="chart-wrap"><canvas id="catChart"></canvas></div>
     </div>
     <div class="chart-card">
@@ -360,7 +388,7 @@ const AI_ANALYSIS = `__AI_ANALYSIS__`;
     .replace(/^---$/gm, "<hr>")
     .replace(/^[-*] (.+)$/gm, "<li>$1</li>")
     .replace(/(<li>.*<\/li>)+/g, m => `<ul>${m}</ul>`)
-    .replace(/^(?!<[h|u|l|h|e])(.*\S.*)$/gm, "<p>$1</p>")
+    .replace(/^(?!<(?:h[1-6]|ul|ol|li|p|hr|table|thead|tbody|tr))(.*\S.*)$/gm, "<p>$1</p>")
     .replace(/<p><\/p>/g, "");
   document.getElementById("aiBody").innerHTML = html;
 })();
@@ -371,43 +399,64 @@ document.getElementById("syncInfo").textContent =
 const fmtCurrency = (n) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
 
-const now = new Date();
-const ms30d = 30 * 24 * 60 * 60 * 1000;
-const txLast30 = TRANSACTIONS.filter(t => {
-  const d = new Date(t.date);
-  return (now - d) <= ms30d && !t.pending && t.amount > 0;
-});
+const titleCase = (s) => (s || "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 
-(function buildCards() {
-  const total30 = txLast30.reduce((s, t) => s + t.amount, 0);
-  const avgTx = txLast30.length ? total30 / txLast30.length : 0;
+const now = new Date();
+let activeDays = 30;
+let catChartInstance = null;
+
+function getWindowTx(days) {
+  if (!days) return TRANSACTIONS.filter(t => !t.pending && t.amount > 0);
+  const ms = days * 24 * 60 * 60 * 1000;
+  return TRANSACTIONS.filter(t => (now - new Date(t.date)) <= ms && !t.pending && t.amount > 0);
+}
+
+function setRange(days) {
+  activeDays = days;
+  document.querySelectorAll(".range-chip").forEach(c => c.classList.toggle("active", +c.dataset.days === days));
+  buildCards(days);
+  buildCatChart(days);
+}
+
+function buildCards(days) {
+  const txWindow = getWindowTx(days);
+  const label = days ? `${days} days` : "all time";
+  const total = txWindow.reduce((s, t) => s + t.amount, 0);
+  const avg = txWindow.length ? total / txWindow.length : 0;
   const catCounts = {};
-  txLast30.forEach(t => { catCounts[t.category_primary] = (catCounts[t.category_primary] || 0) + t.amount; });
+  txWindow.forEach(t => { catCounts[t.category_primary] = (catCounts[t.category_primary] || 0) + t.amount; });
   const topCat = Object.entries(catCounts).sort((a,b) => b[1]-a[1])[0];
   const cards = [
-    { label: "Spent (30 days)", value: fmtCurrency(total30), sub: `${txLast30.length} transactions` },
-    { label: "Avg transaction", value: fmtCurrency(avgTx), sub: "Posted only" },
-    { label: "Top category", value: topCat ? topCat[0].replace(/_/g," ") : "--", sub: topCat ? fmtCurrency(topCat[1]) : "" },
+    { label: `Spent (${label})`, value: fmtCurrency(total), sub: `${txWindow.length} transactions` },
+    { label: "Avg transaction", value: fmtCurrency(avg), sub: "Posted only" },
+    { label: "Top category", value: topCat ? titleCase(topCat[0]) : "--", sub: topCat ? fmtCurrency(topCat[1]) : "" },
     { label: "Total transactions", value: TRANSACTIONS.length.toLocaleString(), sub: "All time" },
   ];
   document.getElementById("summaryCards").innerHTML = cards.map(c => `<div class="card"><div class="label">${c.label}</div><div class="value">${c.value}</div><div class="sub">${c.sub}</div></div>`).join("");
-})();
+}
 
-(function buildCatChart() {
+function buildCatChart(days) {
+  const txWindow = getWindowTx(days);
+  const label = days ? `${days}d` : "All Time";
+  document.getElementById("catChartTitle").textContent = `Spending by Category (${label})`;
   const map = {};
-  txLast30.forEach(t => { map[t.category_primary || "OTHER"] = (map[t.category_primary || "OTHER"] || 0) + t.amount; });
+  txWindow.forEach(t => { map[t.category_primary || "OTHER"] = (map[t.category_primary || "OTHER"] || 0) + t.amount; });
   const sorted = Object.entries(map).sort((a,b) => b[1]-a[1]).slice(0, 10);
-  const colors = ["#6c63ff","#ff6584","#43d98f","#ffbb28","#ff8042","#8dd1e1","#a4de6c","#d0ed57","#ffc658","#83a6ed"];
-  new Chart(document.getElementById("catChart"), {
+  const colors = ["#DA7756","#5ABF8A","#7BB3D4","#F0C070","#C05746","#8BAF7A","#D4956A","#B07060","#E0A868","#8A9EBF"];
+  if (catChartInstance) catChartInstance.destroy();
+  catChartInstance = new Chart(document.getElementById("catChart"), {
     type: "bar",
-    data: { labels: sorted.map(([k]) => k.replace(/_/g," ")), datasets: [{ data: sorted.map(([,v]) => v), backgroundColor: colors, borderRadius: 6 }] },
+    data: { labels: sorted.map(([k]) => titleCase(k)), datasets: [{ data: sorted.map(([,v]) => v), backgroundColor: colors, borderRadius: 6 }] },
     options: {
       indexAxis: "y", responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtCurrency(ctx.raw) } } },
-      scales: { x: { ticks: { color: "#8b8fa8", callback: v => "$"+Math.round(v) }, grid: { color: "#2a2d3e" } }, y: { ticks: { color: "#e8eaf6" }, grid: { display: false } } }
+      scales: { x: { ticks: { color: "#9E8E84", callback: v => "$"+Math.round(v) }, grid: { color: "#3D3530" } }, y: { ticks: { color: "#F5EDE6" }, grid: { display: false } } }
     }
   });
-})();
+}
+
+buildCards(30);
+buildCatChart(30);
 
 (function buildTrendChart() {
   const map = {};
@@ -415,11 +464,11 @@ const txLast30 = TRANSACTIONS.filter(t => {
   const months = Object.keys(map).sort();
   new Chart(document.getElementById("trendChart"), {
     type: "line",
-    data: { labels: months, datasets: [{ data: months.map(m => map[m]), borderColor: "#6c63ff", backgroundColor: "rgba(108,99,255,.12)", fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: "#6c63ff" }] },
+    data: { labels: months, datasets: [{ data: months.map(m => map[m]), borderColor: "#DA7756", backgroundColor: "rgba(218,119,86,.12)", fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: "#DA7756" }] },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtCurrency(ctx.raw) } } },
-      scales: { x: { ticks: { color: "#8b8fa8" }, grid: { color: "#2a2d3e" } }, y: { ticks: { color: "#8b8fa8", callback: v => "$"+Math.round(v) }, grid: { color: "#2a2d3e" } } }
+      scales: { x: { ticks: { color: "#9E8E84" }, grid: { color: "#3D3530" } }, y: { ticks: { color: "#9E8E84", callback: v => "$"+Math.round(v) }, grid: { color: "#3D3530" } } }
     }
   });
 })();
@@ -441,18 +490,34 @@ const txLast30 = TRANSACTIONS.filter(t => {
   subs.sort((a,b) => b.avgAmt - a.avgAmt);
   const el = document.getElementById("subscriptions");
   if (!subs.length) { el.innerHTML = '<div class="empty">No recurring charges detected yet.</div>'; return; }
-  el.innerHTML = `<table class="sub-table"><thead><tr><th>Merchant</th><th>Category</th><th>Avg Amount</th><th>Months</th><th>Charges</th></tr></thead><tbody>${subs.map(s => `<tr><td><strong>${s.merchant}</strong></td><td><span class="badge badge-purple">${(s.category||"").replace(/_/g," ")}</span></td><td>${fmtCurrency(s.avgAmt)}</td><td>${s.months}</td><td>${s.txns}</td></tr>`).join("")}</tbody></table>`;
+  const escSub = v => String(v ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  el.innerHTML = `<table class="sub-table"><thead><tr><th>Merchant</th><th>Category</th><th>Avg Amount</th><th>Months</th><th>Charges</th></tr></thead><tbody>${subs.map(s => `<tr><td><strong>${escSub(s.merchant)}</strong></td><td><span class="badge badge-purple">${escSub(titleCase(s.category))}</span></td><td>${fmtCurrency(s.avgAmt)}</td><td>${s.months}</td><td>${s.txns}</td></tr>`).join("")}</tbody></table>`;
 })();
 
 (function buildWaste() {
   const waste = [];
-  TRANSACTIONS.filter(t => t.pending).forEach(t => { const age = Math.round((now - new Date(t.date)) / 86400000); if (age >= 5) waste.push({ name: t.merchant_name || t.name, detail: `Pending ${age} days - ${fmtCurrency(t.amount)}` }); });
+  // Small recurring charges (< $10, seen in 2+ months) — likely forgotten subscriptions
   const micro = {};
-  TRANSACTIONS.filter(t => !t.pending && t.amount > 0 && t.amount < 5).forEach(t => { const key = (t.merchant_name || t.name).trim(); if (!micro[key]) micro[key] = new Set(); micro[key].add(t.date.slice(0,7)); });
-  for (const [name, months] of Object.entries(micro)) { if (months.size >= 2) waste.push({ name, detail: `Small recurring - ${months.size} months` }); }
+  TRANSACTIONS.filter(t => !t.pending && t.amount > 0 && t.amount < 10).forEach(t => {
+    const key = (t.merchant_name || t.name).trim();
+    if (!micro[key]) micro[key] = { months: new Set(), total: 0 };
+    micro[key].months.add(t.date.slice(0,7));
+    micro[key].total += t.amount;
+  });
+  for (const [name, { months, total }] of Object.entries(micro)) {
+    if (months.size >= 2) waste.push({ name, detail: `Small recurring · ${months.size} months · ${fmtCurrency(total)} total` });
+  }
+  // Duplicate streaming / similar-category subscriptions
+  const streamingCats = ["ENTERTAINMENT", "VIDEO_STREAMING", "MUSIC_STREAMING", "DIGITAL_ENTERTAINMENT"];
+  const streaming = TRANSACTIONS.filter(t => !t.pending && t.amount > 0 && streamingCats.some(c => (t.category_primary + t.category_detailed).includes(c)));
+  const streamMerchants = [...new Set(streaming.map(t => (t.merchant_name || t.name).trim()))];
+  if (streamMerchants.length >= 3) {
+    waste.push({ name: "Multiple streaming services", detail: `${streamMerchants.slice(0,3).join(", ")}${streamMerchants.length > 3 ? ` +${streamMerchants.length - 3} more` : ""}` });
+  }
   const el = document.getElementById("wasteList");
   if (!waste.length) { el.innerHTML = '<div class="empty">No potential waste detected.</div>'; return; }
-  el.innerHTML = waste.slice(0,20).map(w => `<div class="waste-item"><div class="w-name">${w.name}</div><div class="w-detail">${w.detail}</div></div>`).join("");
+  const escW = v => String(v ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  el.innerHTML = waste.slice(0,20).map(w => `<div class="waste-item"><div class="w-name">${escW(w.name)}</div><div class="w-detail">${escW(w.detail)}</div></div>`).join("");
 })();
 
 (function buildTable() {
@@ -461,7 +526,7 @@ const txLast30 = TRANSACTIONS.filter(t => {
   const channels = [...new Set(TRANSACTIONS.map(t => t.payment_channel).filter(Boolean))].sort();
   const months = [...new Set(TRANSACTIONS.map(t => t.date.slice(0,7)).filter(Boolean))].sort().reverse();
   const catSel = document.getElementById("catFilter"); const chSel = document.getElementById("channelFilter"); const moSel = document.getElementById("monthFilter");
-  cats.forEach(c => catSel.appendChild(new Option(c.replace(/_/g," "), c)));
+  cats.forEach(c => catSel.appendChild(new Option(titleCase(c), c)));
   channels.forEach(c => chSel.appendChild(new Option(c, c)));
   months.forEach(m => moSel.appendChild(new Option(m, m)));
   function applyFilters() {
@@ -477,11 +542,12 @@ const txLast30 = TRANSACTIONS.filter(t => {
     page = 0; render();
   }
   function sortData() { filtered.sort((a, b) => { let av = a[sortCol], bv = b[sortCol]; if (sortCol === "amount") { av = +av; bv = +bv; } if (av < bv) return -sortDir; if (av > bv) return sortDir; return 0; }); }
+  function esc(v) { return String(v ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
   function render() {
     sortData(); const total = filtered.length; const start = page * PAGE_SIZE; const slice = filtered.slice(start, start + PAGE_SIZE);
     const body = document.getElementById("txBody");
     if (!slice.length) { body.innerHTML = `<tr><td colspan="7" class="empty">No transactions found.</td></tr>`; }
-    else { body.innerHTML = slice.map(t => { const amtClass = t.amount < 0 ? "amount-pos" : "amount-neg"; const amtDisplay = t.amount < 0 ? `+${fmtCurrency(-t.amount)}` : fmtCurrency(t.amount); const status = t.pending ? `<span class="badge badge-purple">Pending</span>` : `<span class="badge badge-green">Posted</span>`; return `<tr><td>${t.date}</td><td>${t.merchant_name || "--"}</td><td>${t.name}</td><td class="${amtClass}">${amtDisplay}</td><td>${(t.category_primary||"").replace(/_/g," ")}</td><td>${t.payment_channel || "--"}</td><td>${status}</td></tr>`; }).join(""); }
+    else { body.innerHTML = slice.map(t => { const amtClass = t.amount < 0 ? "amount-pos" : "amount-neg"; const amtDisplay = t.amount < 0 ? `+${fmtCurrency(-t.amount)}` : fmtCurrency(t.amount); const status = t.pending ? `<span class="badge badge-purple">Pending</span>` : `<span class="badge badge-green">Posted</span>`; return `<tr><td>${esc(t.date)}</td><td>${esc(t.merchant_name) || "--"}</td><td>${esc(t.name)}</td><td class="${amtClass}">${amtDisplay}</td><td>${esc(titleCase(t.category_primary))}</td><td>${esc(t.payment_channel) || "--"}</td><td>${status}</td></tr>`; }).join(""); }
     const pages = Math.ceil(total / PAGE_SIZE);
     document.getElementById("pagination").innerHTML = `<span>${total.toLocaleString()} transactions</span><button onclick="prevPage()" ${page===0?"disabled":""}>Prev</button><span>Page ${page+1} of ${Math.max(1,pages)}</span><button onclick="nextPage()" ${page>=pages-1?"disabled":""}>Next</button>`;
   }
@@ -494,7 +560,7 @@ const txLast30 = TRANSACTIONS.filter(t => {
 })();
 
 // ── Chat Panel ──────────────────────────────────────────────────────────────
-const SUPABASE_FN = "https://acouuzccqkcpyrckrgwg.supabase.co/functions/v1";
+const SUPABASE_FN = "__SUPABASE_FN__";
 let chatConversation = [];
 
 function toggleChat() {
@@ -533,7 +599,7 @@ function mdToHtml(md) {
     })
     .replace(/^---$/gm, "<hr>")
     .replace(/\\n\\n/g, "<br>")
-    .replace(/^(?!<[htulbco])(.*\S.*)$/gm, "<p>$1</p>")
+    .replace(/^(?!<(?:h[1-6]|ul|ol|li|p|hr|table|thead|tbody|tr))(.*\S.*)$/gm, "<p>$1</p>")
     .replace(/<p><\/p>/g, "");
 }
 
@@ -574,6 +640,7 @@ async function syncNow() {
   btn.disabled = true;
   try {
     const res = await fetch(`${SUPABASE_FN}/plaid-sync`, { method: "POST" });
+    if (res.status === 404) throw new Error("Run `python plaid_sync.py` locally to sync");
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     if (data.new_count > 0) {
@@ -584,9 +651,12 @@ async function syncNow() {
       setTimeout(() => { btn.textContent = "↻ Sync"; btn.disabled = false; }, 2500);
     }
   } catch(e) {
-    btn.textContent = "✗ Failed";
-    btn.style.background = "var(--red)";
-    setTimeout(() => { btn.textContent = "↻ Sync"; btn.disabled = false; btn.style.background = ""; }, 3000);
+    btn.textContent = "↻ Sync";
+    btn.disabled = false;
+    const syncInfo = document.getElementById("syncInfo");
+    syncInfo.style.color = "var(--red)";
+    syncInfo.textContent = e.message;
+    setTimeout(() => { syncInfo.style.color = ""; syncInfo.textContent = LAST_SYNC ? "Last synced: " + new Date(LAST_SYNC).toLocaleString() : "No sync yet"; }, 5000);
   }
 }
 
@@ -631,11 +701,13 @@ function exportCSV() {
 </html>"""
 
 
-def build_dashboard(transactions: list[dict], last_sync: str, analysis: str = "") -> str:
+def build_dashboard(transactions: list[dict], last_sync: str, analysis: str = "", supabase_fn: str = "") -> str:
     return DASHBOARD_TEMPLATE.replace(
         "__TRANSACTIONS_JSON__",
         json.dumps(transactions, ensure_ascii=False),
     ).replace("__LAST_SYNC__", last_sync).replace(
+        "__SUPABASE_FN__", supabase_fn,
+    ).replace(
         "__AI_ANALYSIS__",
         analysis.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${") if analysis else "",
     )
@@ -673,12 +745,19 @@ def main() -> None:
         item_id = token_row.get("item_id", "")
         print(f"\nSyncing item: {item_id}")
 
-        new_txns, next_cursor = sync_transactions(base_url, client_id, secret, access_token, cursor)
-        print(f"  Fetched {len(new_txns)} transaction(s)")
+        new_txns, modified_txns, removed_ids, next_cursor = sync_transactions(
+            base_url, client_id, secret, access_token, cursor
+        )
+        print(f"  Fetched {len(new_txns)} added, {len(modified_txns)} modified, {len(removed_ids)} removed")
         total_new += len(new_txns)
 
         if new_txns:
             supabase_upsert("transactions", new_txns, on_conflict="transaction_id")
+        if modified_txns:
+            supabase_upsert("transactions", modified_txns, on_conflict="transaction_id")
+        if removed_ids:
+            supabase_delete("transactions", removed_ids)
+            print(f"  Deleted {len(removed_ids)} removed transaction(s)")
 
         supabase_update("plaid_tokens", {"item_id": item_id}, {
             "cursor": next_cursor,
@@ -701,8 +780,9 @@ def main() -> None:
         print("  Analysis saved to exports/analysis_report.md")
 
     # Regenerate dashboard
+    supabase_fn_url = f"{sb_url}/functions/v1"
     DASHBOARD_FILE.parent.mkdir(parents=True, exist_ok=True)
-    html = build_dashboard(all_txns, last_sync, analysis)
+    html = build_dashboard(all_txns, last_sync, analysis, supabase_fn=supabase_fn_url)
     DASHBOARD_FILE.write_text(html, encoding="utf-8")
     print(f"  Dashboard written to {DASHBOARD_FILE}")
     print("\nDone.")

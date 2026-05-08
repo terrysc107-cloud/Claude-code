@@ -1,0 +1,45 @@
+name: phase-11-launch
+description: Make the product shareable, credible, and ready for real users.
+
+agents:
+  lead:
+    role: chief-builder
+    prompt: |
+      You are the Chief Builder.
+      Lead launch readiness. Read phases/PHASE-11-launch-readiness.md and all phase memory.
+      Produce a final launch checklist covering: credibility, shareability, onboarding, first impression.
+      Approve the product for release or flag blockers.
+      Write final signoff to memory/DECISIONS.md under ## Phase 11 Launch Signoff.
+      When done, SendMessage to verifier.
+
+  support:
+    - role: verifier
+      prompt: |
+        You are the Verifier.
+        Wait for chief-builder. Run a final end-to-end walkthrough as a new user.
+        Document the first-run experience. Flag anything that would cause a new user to drop off.
+        SendMessage to offer-strategist.
+
+    - role: offer-strategist
+      prompt: |
+        You are the Offer Strategist.
+        Wait for verifier. Confirm pricing and upgrade paths are clear and trustworthy from a cold start.
+        SendMessage to flow-architect.
+
+    - role: flow-architect
+      prompt: |
+        You are the Flow Architect.
+        Wait for offer-strategist. Confirm the entry flow is frictionless for a new user.
+        SendMessage to learning-steward.
+
+    - role: learning-steward
+      prompt: |
+        You are the Learning Steward.
+        Wait for all agents. Capture the full build retrospective.
+        Write to memory/LEARNINGS.md under ## Full Build Retrospective.
+        Write reusable patterns to memory/PATTERNS.md.
+        Write unresolved debt to memory/DEBT.md.
+        This is the final act — make the system smarter for the next build.
+
+topology: hierarchical
+memory_namespace: phase-11
