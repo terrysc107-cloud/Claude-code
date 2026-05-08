@@ -80,6 +80,18 @@ def supabase_update(table: str, match: dict, data: dict) -> None:
     resp.raise_for_status()
 
 
+def supabase_delete(table: str, ids: list[str], id_col: str = "transaction_id") -> None:
+    if not ids:
+        return
+    headers = supabase_headers()
+    headers["Prefer"] = "return=minimal"
+    # PostgREST IN filter: col=in.(a,b,c)
+    values = ",".join(ids)
+    url = f"{supabase_url()}/rest/v1/{table}?{id_col}=in.({values})"
+    resp = requests.delete(url, headers=headers, timeout=30)
+    resp.raise_for_status()
+
+
 # ---------------------------------------------------------------------------
 # Plaid helpers
 # ---------------------------------------------------------------------------
@@ -135,31 +147,37 @@ def flatten_transaction(txn: dict, sync_time: str) -> dict:
 # Sync logic
 # ---------------------------------------------------------------------------
 
-def sync_transactions(base_url: str, client_id: str, secret: str, access_token: str, cursor: str) -> tuple[list[dict], str]:
+def sync_transactions(
+    base_url: str, client_id: str, secret: str, access_token: str, cursor: str
+) -> tuple[list[dict], list[dict], list[str], str]:
     sync_time = datetime.now(timezone.utc).isoformat()
 
     all_added: list[dict] = []
+    all_modified: list[dict] = []
+    all_removed_ids: list[str] = []
     has_more = True
     page = 0
 
     while has_more:
         page += 1
-        payload: dict = {
-            "client_id": client_id,
-            "secret": secret,
-            "access_token": access_token,
-        }
+        payload: dict = {"client_id": client_id, "secret": secret, "access_token": access_token}
         if cursor:
             payload["cursor"] = cursor
 
         data = plaid_post(base_url, "/transactions/sync", payload)
         added = data.get("added", [])
+        modified = data.get("modified", [])
+        removed = data.get("removed", [])
+
         all_added.extend(flatten_transaction(t, sync_time) for t in added)
+        all_modified.extend(flatten_transaction(t, sync_time) for t in modified)
+        all_removed_ids.extend(r["transaction_id"] for r in removed if r.get("transaction_id"))
+
         cursor = data.get("next_cursor", cursor)
         has_more = data.get("has_more", False)
-        print(f"  Page {page}: {len(added)} added, has_more={has_more}")
+        print(f"  Page {page}: {len(added)} added, {len(modified)} modified, {len(removed)} removed, has_more={has_more}")
 
-    return all_added, cursor
+    return all_added, all_modified, all_removed_ids, cursor
 
 
 # ---------------------------------------------------------------------------
@@ -243,6 +261,10 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   .ai-body em { color: var(--muted); font-size: 12px; }
   .ai-body hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
   .ai-empty { color: var(--muted); font-size: 13px; font-style: italic; }
+  .range-chips { display: flex; gap: 6px; margin-bottom: 16px; }
+  .range-chip { background: var(--surface); border: 1px solid var(--border); color: var(--muted); border-radius: 20px; padding: 5px 14px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s; }
+  .range-chip:hover { border-color: var(--accent); color: var(--accent); }
+  .range-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
   .header-actions { display: flex; gap: 8px; align-items: center; }
   .btn { padding: 8px 14px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; border: none; transition: opacity .15s; }
   .btn:hover { opacity: .8; }
@@ -297,10 +319,16 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
     <h2>AI Analysis <span class="ai-badge">Claude</span></h2>
     <div class="ai-body" id="aiBody"></div>
   </div>
+  <div class="range-chips" id="rangeChips">
+    <button class="range-chip" data-days="7" onclick="setRange(7)">7 days</button>
+    <button class="range-chip active" data-days="30" onclick="setRange(30)">30 days</button>
+    <button class="range-chip" data-days="90" onclick="setRange(90)">90 days</button>
+    <button class="range-chip" data-days="0" onclick="setRange(0)">All time</button>
+  </div>
   <div class="cards" id="summaryCards"></div>
   <div class="charts">
     <div class="chart-card">
-      <h2>Spending by Category (30d)</h2>
+      <h2 id="catChartTitle">Spending by Category (30d)</h2>
       <div class="chart-wrap"><canvas id="catChart"></canvas></div>
     </div>
     <div class="chart-card">
@@ -374,33 +402,49 @@ const fmtCurrency = (n) =>
 const titleCase = (s) => (s || "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 
 const now = new Date();
-const ms30d = 30 * 24 * 60 * 60 * 1000;
-const txLast30 = TRANSACTIONS.filter(t => {
-  const d = new Date(t.date);
-  return (now - d) <= ms30d && !t.pending && t.amount > 0;
-});
+let activeDays = 30;
+let catChartInstance = null;
 
-(function buildCards() {
-  const total30 = txLast30.reduce((s, t) => s + t.amount, 0);
-  const avgTx = txLast30.length ? total30 / txLast30.length : 0;
+function getWindowTx(days) {
+  if (!days) return TRANSACTIONS.filter(t => !t.pending && t.amount > 0);
+  const ms = days * 24 * 60 * 60 * 1000;
+  return TRANSACTIONS.filter(t => (now - new Date(t.date)) <= ms && !t.pending && t.amount > 0);
+}
+
+function setRange(days) {
+  activeDays = days;
+  document.querySelectorAll(".range-chip").forEach(c => c.classList.toggle("active", +c.dataset.days === days));
+  buildCards(days);
+  buildCatChart(days);
+}
+
+function buildCards(days) {
+  const txWindow = getWindowTx(days);
+  const label = days ? `${days} days` : "all time";
+  const total = txWindow.reduce((s, t) => s + t.amount, 0);
+  const avg = txWindow.length ? total / txWindow.length : 0;
   const catCounts = {};
-  txLast30.forEach(t => { catCounts[t.category_primary] = (catCounts[t.category_primary] || 0) + t.amount; });
+  txWindow.forEach(t => { catCounts[t.category_primary] = (catCounts[t.category_primary] || 0) + t.amount; });
   const topCat = Object.entries(catCounts).sort((a,b) => b[1]-a[1])[0];
   const cards = [
-    { label: "Spent (30 days)", value: fmtCurrency(total30), sub: `${txLast30.length} transactions` },
-    { label: "Avg transaction", value: fmtCurrency(avgTx), sub: "Posted only" },
+    { label: `Spent (${label})`, value: fmtCurrency(total), sub: `${txWindow.length} transactions` },
+    { label: "Avg transaction", value: fmtCurrency(avg), sub: "Posted only" },
     { label: "Top category", value: topCat ? titleCase(topCat[0]) : "--", sub: topCat ? fmtCurrency(topCat[1]) : "" },
     { label: "Total transactions", value: TRANSACTIONS.length.toLocaleString(), sub: "All time" },
   ];
   document.getElementById("summaryCards").innerHTML = cards.map(c => `<div class="card"><div class="label">${c.label}</div><div class="value">${c.value}</div><div class="sub">${c.sub}</div></div>`).join("");
-})();
+}
 
-(function buildCatChart() {
+function buildCatChart(days) {
+  const txWindow = getWindowTx(days);
+  const label = days ? `${days}d` : "All Time";
+  document.getElementById("catChartTitle").textContent = `Spending by Category (${label})`;
   const map = {};
-  txLast30.forEach(t => { map[t.category_primary || "OTHER"] = (map[t.category_primary || "OTHER"] || 0) + t.amount; });
+  txWindow.forEach(t => { map[t.category_primary || "OTHER"] = (map[t.category_primary || "OTHER"] || 0) + t.amount; });
   const sorted = Object.entries(map).sort((a,b) => b[1]-a[1]).slice(0, 10);
   const colors = ["#6c63ff","#ff6584","#43d98f","#ffbb28","#ff8042","#8dd1e1","#a4de6c","#d0ed57","#ffc658","#83a6ed"];
-  new Chart(document.getElementById("catChart"), {
+  if (catChartInstance) catChartInstance.destroy();
+  catChartInstance = new Chart(document.getElementById("catChart"), {
     type: "bar",
     data: { labels: sorted.map(([k]) => titleCase(k)), datasets: [{ data: sorted.map(([,v]) => v), backgroundColor: colors, borderRadius: 6 }] },
     options: {
@@ -409,7 +453,10 @@ const txLast30 = TRANSACTIONS.filter(t => {
       scales: { x: { ticks: { color: "#8b8fa8", callback: v => "$"+Math.round(v) }, grid: { color: "#2a2d3e" } }, y: { ticks: { color: "#e8eaf6" }, grid: { display: false } } }
     }
   });
-})();
+}
+
+buildCards(30);
+buildCatChart(30);
 
 (function buildTrendChart() {
   const map = {};
@@ -449,10 +496,24 @@ const txLast30 = TRANSACTIONS.filter(t => {
 
 (function buildWaste() {
   const waste = [];
-  TRANSACTIONS.filter(t => t.pending).forEach(t => { const age = Math.round((now - new Date(t.date)) / 86400000); if (age >= 5) waste.push({ name: t.merchant_name || t.name, detail: `Pending ${age} days - ${fmtCurrency(t.amount)}` }); });
+  // Small recurring charges (< $10, seen in 2+ months) — likely forgotten subscriptions
   const micro = {};
-  TRANSACTIONS.filter(t => !t.pending && t.amount > 0 && t.amount < 5).forEach(t => { const key = (t.merchant_name || t.name).trim(); if (!micro[key]) micro[key] = new Set(); micro[key].add(t.date.slice(0,7)); });
-  for (const [name, months] of Object.entries(micro)) { if (months.size >= 2) waste.push({ name, detail: `Small recurring - ${months.size} months` }); }
+  TRANSACTIONS.filter(t => !t.pending && t.amount > 0 && t.amount < 10).forEach(t => {
+    const key = (t.merchant_name || t.name).trim();
+    if (!micro[key]) micro[key] = { months: new Set(), total: 0 };
+    micro[key].months.add(t.date.slice(0,7));
+    micro[key].total += t.amount;
+  });
+  for (const [name, { months, total }] of Object.entries(micro)) {
+    if (months.size >= 2) waste.push({ name, detail: `Small recurring · ${months.size} months · ${fmtCurrency(total)} total` });
+  }
+  // Duplicate streaming / similar-category subscriptions
+  const streamingCats = ["ENTERTAINMENT", "VIDEO_STREAMING", "MUSIC_STREAMING", "DIGITAL_ENTERTAINMENT"];
+  const streaming = TRANSACTIONS.filter(t => !t.pending && t.amount > 0 && streamingCats.some(c => (t.category_primary + t.category_detailed).includes(c)));
+  const streamMerchants = [...new Set(streaming.map(t => (t.merchant_name || t.name).trim()))];
+  if (streamMerchants.length >= 3) {
+    waste.push({ name: "Multiple streaming services", detail: `${streamMerchants.slice(0,3).join(", ")}${streamMerchants.length > 3 ? ` +${streamMerchants.length - 3} more` : ""}` });
+  }
   const el = document.getElementById("wasteList");
   if (!waste.length) { el.innerHTML = '<div class="empty">No potential waste detected.</div>'; return; }
   const escW = v => String(v ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
@@ -684,12 +745,19 @@ def main() -> None:
         item_id = token_row.get("item_id", "")
         print(f"\nSyncing item: {item_id}")
 
-        new_txns, next_cursor = sync_transactions(base_url, client_id, secret, access_token, cursor)
-        print(f"  Fetched {len(new_txns)} transaction(s)")
+        new_txns, modified_txns, removed_ids, next_cursor = sync_transactions(
+            base_url, client_id, secret, access_token, cursor
+        )
+        print(f"  Fetched {len(new_txns)} added, {len(modified_txns)} modified, {len(removed_ids)} removed")
         total_new += len(new_txns)
 
         if new_txns:
             supabase_upsert("transactions", new_txns, on_conflict="transaction_id")
+        if modified_txns:
+            supabase_upsert("transactions", modified_txns, on_conflict="transaction_id")
+        if removed_ids:
+            supabase_delete("transactions", removed_ids)
+            print(f"  Deleted {len(removed_ids)} removed transaction(s)")
 
         supabase_update("plaid_tokens", {"item_id": item_id}, {
             "cursor": next_cursor,

@@ -30,3 +30,17 @@
 {"type":"edit","file":"/home/user/Claude-code/CLAUDE.md","timestamp":1778280351438,"sessionId":null}
 {"type":"edit","file":"/home/user/Claude-code/memory/LEARNINGS.md","timestamp":1778280381578,"sessionId":null}
 {"type":"edit","file":"/home/user/Claude-code/memory/DEBT.md","timestamp":1778280391484,"sessionId":null}
+{"type":"edit","file":"/home/user/Claude-code/supabase/functions/create-link-token/index.ts","timestamp":1778280757190,"sessionId":null}
+{"type":"edit","file":"/home/user/Claude-code/supabase/functions/exchange-token/index.ts","timestamp":1778280776023,"sessionId":null}
+{"type":"edit","file":"/home/user/Claude-code/supabase/functions/plaid-sync/index.ts","timestamp":1778280802804,"sessionId":null}
+{"type":"edit","file":"/home/user/Claude-code/supabase/functions/finance-chat/index.ts","timestamp":1778280827175,"sessionId":null}
+{"type":"edit","file":"/home/user/Claude-code/supabase/config.toml","timestamp":1778280833192,"sessionId":null}
+{"type":"edit","file":"/home/user/Claude-code/supabase/migrations/20260101000000_init.sql","timestamp":1778280840237,"sessionId":null}
+{"type":"edit","file":"/home/user/Claude-code/plaid_sync.py","timestamp":1778280869448,"sessionId":null}
+{"type":"edit","file":"/home/user/Claude-code/plaid_sync.py","timestamp":1778280874598,"sessionId":null}
+{"type":"edit","file":"/home/user/Claude-code/plaid_sync.py","timestamp":1778280898966,"sessionId":null}
+{"type":"edit","file":"/home/user/Claude-code/plaid_sync.py","timestamp":1778280911901,"sessionId":null}
+{"type":"edit","file":"/home/user/Claude-code/plaid_sync.py","timestamp":1778280925650,"sessionId":null}
+{"type":"edit","file":"/home/user/Claude-code/plaid_sync.py","timestamp":1778280935636,"sessionId":null}
+{"type":"edit","file":"/home/user/Claude-code/plaid_sync.py","timestamp":1778280941719,"sessionId":null}
+{"type":"edit","file":"/home/user/Claude-code/memory/DEBT.md","timestamp":1778280977743,"sessionId":null}
