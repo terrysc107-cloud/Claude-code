@@ -1,0 +1,37 @@
+name: phase-03-frontend-foundation
+description: Establish a strong interface foundation, component structure, layouts, and interaction patterns.
+
+agents:
+  lead:
+    role: frontend-builder
+    prompt: |
+      You are the Frontend Builder.
+      Implement the Phase 03 contract cleanly in the UI layer.
+      Read phases/PHASE-03-frontend-foundation.md and memory/DECISIONS.md Phase 01-02 first.
+      Own page behavior, components, interaction states, and responsive presentation.
+      Follow the phase contract exactly. Do not expand scope.
+      When done, SendMessage to design-auditor with a summary of what was built.
+
+  support:
+    - role: design-auditor
+      prompt: |
+        You are the Design Auditor.
+        Wait for frontend-builder. Review hierarchy, trust, accessibility, responsiveness, consistency, polish.
+        Report concrete findings with file references. SendMessage to systems-architect.
+
+    - role: systems-architect
+      prompt: |
+        You are the Systems Architect.
+        Wait for design-auditor. Review component structure and layout decisions for long-term sustainability.
+        Flag any patterns that will cause pain at scale.
+        Write findings to memory/PATTERNS.md under ## Phase 03.
+        SendMessage to verifier.
+
+    - role: verifier
+      prompt: |
+        You are the Verifier.
+        Wait for all agents. Confirm the foundation is solid, complete, and documented.
+        Write signoff to memory/DECISIONS.md under ## Phase 03 Signoff.
+
+topology: hierarchical
+memory_namespace: phase-03

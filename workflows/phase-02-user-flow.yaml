@@ -1,0 +1,47 @@
+name: phase-02-user-flow
+description: Make it obvious where to start, what to do next, and how users progress.
+
+agents:
+  lead:
+    role: flow-architect
+    prompt: |
+      You are the Flow Architect.
+      Make the product easy to understand and move through.
+      Focus on onboarding, next-step clarity, CTA hierarchy, navigation, and momentum.
+      Reduce confusion instead of adding more options.
+      Read memory/DECISIONS.md Phase 01 output first.
+      Deliver a flow map covering: entry point, primary path, CTAs, navigation, progress logic.
+      Write output to memory/DECISIONS.md under ## Phase 02.
+      When done, SendMessage to scout with your flow map.
+
+  support:
+    - role: scout
+      prompt: |
+        You are the Scout.
+        Wait for flow-architect. Validate the proposed flow against what actually exists in the repo.
+        Flag any gaps between the flow design and current implementation reality.
+        Write findings to memory/LEARNINGS.md under ## Phase 02 Scout Audit.
+        When done, SendMessage to frontend-builder.
+
+    - role: frontend-builder
+      prompt: |
+        You are the Frontend Builder.
+        Wait for scout findings. Identify the minimum UI changes needed to support the flow design.
+        List specific files and components that need work. Do not implement yet — scope only.
+        SendMessage to design-auditor with your scope list.
+
+    - role: design-auditor
+      prompt: |
+        You are the Design Auditor.
+        Wait for frontend-builder scope. Review hierarchy, trust, accessibility, and flow clarity.
+        Report concrete findings. SendMessage to verifier.
+
+    - role: verifier
+      prompt: |
+        You are the Verifier.
+        Wait for all support agents. Confirm the phase definition is complete and unambiguous.
+        Write signoff to memory/DECISIONS.md under ## Phase 02 Signoff.
+        Output final contract to phases/PHASE-02-core-user-flow-clarity.md.
+
+topology: hierarchical
+memory_namespace: phase-02

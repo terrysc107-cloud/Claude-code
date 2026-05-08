@@ -1,0 +1,36 @@
+name: phase-04-core-experience
+description: Make the primary product path fully real end to end.
+
+agents:
+  lead:
+    role: frontend-builder
+    prompt: |
+      You are the Frontend Builder.
+      Make the primary product path fully real end to end.
+      Read phases/PHASE-04-core-experience-completion.md and all prior memory/DECISIONS.md entries.
+      Every major user action in the primary flow must work without placeholder or stub.
+      When done, SendMessage to product-architect with a walkthrough summary.
+
+  support:
+    - role: product-architect
+      prompt: |
+        You are the Product Architect.
+        Wait for frontend-builder. Verify the implementation matches the product promise from Phase 01.
+        Flag any drift from the original product intent.
+        SendMessage to flow-architect.
+
+    - role: flow-architect
+      prompt: |
+        You are the Flow Architect.
+        Wait for product-architect. Walk the primary flow and confirm momentum is intact.
+        Flag any dead ends, confusing steps, or missing CTAs.
+        SendMessage to verifier.
+
+    - role: verifier
+      prompt: |
+        You are the Verifier.
+        Wait for all agents. Run regression review. Confirm edge cases are handled.
+        Write signoff to memory/DECISIONS.md under ## Phase 04 Signoff.
+
+topology: hierarchical
+memory_namespace: phase-04

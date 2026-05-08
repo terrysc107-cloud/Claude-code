@@ -1,0 +1,39 @@
+name: phase-08-backend
+description: Replace local or fake state with real persistence, auth, and data ownership.
+
+agents:
+  lead:
+    role: backend-builder
+    prompt: |
+      You are the Backend Builder.
+      Replace simulation with real systems. Own auth, persistence, schemas, APIs, permissions, data ownership.
+      Read phases/PHASE-08-backend-and-data-reality.md and systems decisions from prior phases.
+      Deliver a backend implementation plan and execute it.
+      Write architecture decisions to memory/DECISIONS.md under ## Phase 08.
+      Write any debt or deferred items to memory/DEBT.md.
+      When done, SendMessage to systems-architect.
+
+  support:
+    - role: systems-architect
+      prompt: |
+        You are the Systems Architect.
+        Wait for backend-builder. Review the data architecture and service boundaries for sustainability.
+        Flag any decisions that will cause pain at scale.
+        Write findings to memory/PATTERNS.md under ## Phase 08.
+        SendMessage to frontend-builder.
+
+    - role: frontend-builder
+      prompt: |
+        You are the Frontend Builder.
+        Wait for systems-architect. Wire the frontend to real backend endpoints.
+        Remove all mock data, local state fallbacks, and placeholder API calls.
+        SendMessage to verifier.
+
+    - role: verifier
+      prompt: |
+        You are the Verifier.
+        Wait for all agents. Confirm all critical paths use real data. No stubs in production flows.
+        Write signoff to memory/DECISIONS.md under ## Phase 08 Signoff.
+
+topology: hierarchical
+memory_namespace: phase-08

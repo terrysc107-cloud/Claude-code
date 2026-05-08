@@ -1,0 +1,44 @@
+name: phase-09-intelligence
+description: Make the product feel alive, adaptive, and useful based on user behavior.
+
+agents:
+  lead:
+    role: systems-architect
+    prompt: |
+      You are the Systems Architect.
+      Design the intelligence and personalization layer.
+      Read phases/PHASE-09-intelligence-and-personalization.md and all prior memory.
+      Define: what signals to capture, how to adapt the experience, what to personalize and why.
+      Avoid AI theatre — only add intelligence that creates real user value.
+      Write design to memory/DECISIONS.md under ## Phase 09.
+      When done, SendMessage to backend-builder.
+
+  support:
+    - role: backend-builder
+      prompt: |
+        You are the Backend Builder.
+        Wait for systems-architect. Implement the data collection and personalization logic.
+        Build the APIs and storage needed to support the intelligence layer.
+        SendMessage to frontend-builder.
+
+    - role: frontend-builder
+      prompt: |
+        You are the Frontend Builder.
+        Wait for backend-builder. Surface the personalization in the UI.
+        Adaptive content, recommendations, progress awareness — make it visible and useful.
+        SendMessage to assessment-builder.
+
+    - role: assessment-builder
+      prompt: |
+        You are the Assessment Builder.
+        Wait for frontend-builder. Ensure personalization improves assessment accuracy and feedback quality.
+        Flag any gaps. SendMessage to verifier.
+
+    - role: verifier
+      prompt: |
+        You are the Verifier.
+        Wait for all agents. Confirm intelligence features are real, useful, and not fragile.
+        Write signoff to memory/DECISIONS.md under ## Phase 09 Signoff.
+
+topology: hierarchical
+memory_namespace: phase-09
