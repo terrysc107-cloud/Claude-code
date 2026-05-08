@@ -250,7 +250,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   .btn-sync { background: var(--accent); color: #fff; }
   .btn-export { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
   .btn-chat { background: var(--green); color: #0f1117; }
-  .chat-panel { position: fixed; right: 0; top: 0; height: 100vh; width: 420px; max-width: 100vw; background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; transform: translateX(100%); transition: transform .3s ease; z-index: 1000; box-shadow: -4px 0 24px rgba(0,0,0,.4); }
+  .chat-panel { position: fixed; right: 0; top: 0; height: 100vh; width: min(420px, 100vw); background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; transform: translateX(100%); transition: transform .3s ease; z-index: 1000; box-shadow: -4px 0 24px rgba(0,0,0,.4); }
   .chat-panel.open { transform: translateX(0); }
   .chat-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
   .chat-header h3 { font-size: 14px; font-weight: 600; color: var(--text); }
@@ -360,7 +360,7 @@ const AI_ANALYSIS = `__AI_ANALYSIS__`;
     .replace(/^---$/gm, "<hr>")
     .replace(/^[-*] (.+)$/gm, "<li>$1</li>")
     .replace(/(<li>.*<\/li>)+/g, m => `<ul>${m}</ul>`)
-    .replace(/^(?!<[h|u|l|h|e])(.*\S.*)$/gm, "<p>$1</p>")
+    .replace(/^(?!<(?:h[1-6]|ul|ol|li|p|hr|table|thead|tbody|tr))(.*\S.*)$/gm, "<p>$1</p>")
     .replace(/<p><\/p>/g, "");
   document.getElementById("aiBody").innerHTML = html;
 })();
@@ -370,6 +370,8 @@ document.getElementById("syncInfo").textContent =
 
 const fmtCurrency = (n) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+
+const titleCase = (s) => (s || "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 
 const now = new Date();
 const ms30d = 30 * 24 * 60 * 60 * 1000;
@@ -387,7 +389,7 @@ const txLast30 = TRANSACTIONS.filter(t => {
   const cards = [
     { label: "Spent (30 days)", value: fmtCurrency(total30), sub: `${txLast30.length} transactions` },
     { label: "Avg transaction", value: fmtCurrency(avgTx), sub: "Posted only" },
-    { label: "Top category", value: topCat ? topCat[0].replace(/_/g," ") : "--", sub: topCat ? fmtCurrency(topCat[1]) : "" },
+    { label: "Top category", value: topCat ? titleCase(topCat[0]) : "--", sub: topCat ? fmtCurrency(topCat[1]) : "" },
     { label: "Total transactions", value: TRANSACTIONS.length.toLocaleString(), sub: "All time" },
   ];
   document.getElementById("summaryCards").innerHTML = cards.map(c => `<div class="card"><div class="label">${c.label}</div><div class="value">${c.value}</div><div class="sub">${c.sub}</div></div>`).join("");
@@ -400,7 +402,7 @@ const txLast30 = TRANSACTIONS.filter(t => {
   const colors = ["#6c63ff","#ff6584","#43d98f","#ffbb28","#ff8042","#8dd1e1","#a4de6c","#d0ed57","#ffc658","#83a6ed"];
   new Chart(document.getElementById("catChart"), {
     type: "bar",
-    data: { labels: sorted.map(([k]) => k.replace(/_/g," ")), datasets: [{ data: sorted.map(([,v]) => v), backgroundColor: colors, borderRadius: 6 }] },
+    data: { labels: sorted.map(([k]) => titleCase(k)), datasets: [{ data: sorted.map(([,v]) => v), backgroundColor: colors, borderRadius: 6 }] },
     options: {
       indexAxis: "y", responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtCurrency(ctx.raw) } } },
@@ -441,7 +443,8 @@ const txLast30 = TRANSACTIONS.filter(t => {
   subs.sort((a,b) => b.avgAmt - a.avgAmt);
   const el = document.getElementById("subscriptions");
   if (!subs.length) { el.innerHTML = '<div class="empty">No recurring charges detected yet.</div>'; return; }
-  el.innerHTML = `<table class="sub-table"><thead><tr><th>Merchant</th><th>Category</th><th>Avg Amount</th><th>Months</th><th>Charges</th></tr></thead><tbody>${subs.map(s => `<tr><td><strong>${s.merchant}</strong></td><td><span class="badge badge-purple">${(s.category||"").replace(/_/g," ")}</span></td><td>${fmtCurrency(s.avgAmt)}</td><td>${s.months}</td><td>${s.txns}</td></tr>`).join("")}</tbody></table>`;
+  const escSub = v => String(v ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  el.innerHTML = `<table class="sub-table"><thead><tr><th>Merchant</th><th>Category</th><th>Avg Amount</th><th>Months</th><th>Charges</th></tr></thead><tbody>${subs.map(s => `<tr><td><strong>${escSub(s.merchant)}</strong></td><td><span class="badge badge-purple">${escSub(titleCase(s.category))}</span></td><td>${fmtCurrency(s.avgAmt)}</td><td>${s.months}</td><td>${s.txns}</td></tr>`).join("")}</tbody></table>`;
 })();
 
 (function buildWaste() {
@@ -452,7 +455,8 @@ const txLast30 = TRANSACTIONS.filter(t => {
   for (const [name, months] of Object.entries(micro)) { if (months.size >= 2) waste.push({ name, detail: `Small recurring - ${months.size} months` }); }
   const el = document.getElementById("wasteList");
   if (!waste.length) { el.innerHTML = '<div class="empty">No potential waste detected.</div>'; return; }
-  el.innerHTML = waste.slice(0,20).map(w => `<div class="waste-item"><div class="w-name">${w.name}</div><div class="w-detail">${w.detail}</div></div>`).join("");
+  const escW = v => String(v ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  el.innerHTML = waste.slice(0,20).map(w => `<div class="waste-item"><div class="w-name">${escW(w.name)}</div><div class="w-detail">${escW(w.detail)}</div></div>`).join("");
 })();
 
 (function buildTable() {
@@ -461,7 +465,7 @@ const txLast30 = TRANSACTIONS.filter(t => {
   const channels = [...new Set(TRANSACTIONS.map(t => t.payment_channel).filter(Boolean))].sort();
   const months = [...new Set(TRANSACTIONS.map(t => t.date.slice(0,7)).filter(Boolean))].sort().reverse();
   const catSel = document.getElementById("catFilter"); const chSel = document.getElementById("channelFilter"); const moSel = document.getElementById("monthFilter");
-  cats.forEach(c => catSel.appendChild(new Option(c.replace(/_/g," "), c)));
+  cats.forEach(c => catSel.appendChild(new Option(titleCase(c), c)));
   channels.forEach(c => chSel.appendChild(new Option(c, c)));
   months.forEach(m => moSel.appendChild(new Option(m, m)));
   function applyFilters() {
@@ -477,11 +481,12 @@ const txLast30 = TRANSACTIONS.filter(t => {
     page = 0; render();
   }
   function sortData() { filtered.sort((a, b) => { let av = a[sortCol], bv = b[sortCol]; if (sortCol === "amount") { av = +av; bv = +bv; } if (av < bv) return -sortDir; if (av > bv) return sortDir; return 0; }); }
+  function esc(v) { return String(v ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
   function render() {
     sortData(); const total = filtered.length; const start = page * PAGE_SIZE; const slice = filtered.slice(start, start + PAGE_SIZE);
     const body = document.getElementById("txBody");
     if (!slice.length) { body.innerHTML = `<tr><td colspan="7" class="empty">No transactions found.</td></tr>`; }
-    else { body.innerHTML = slice.map(t => { const amtClass = t.amount < 0 ? "amount-pos" : "amount-neg"; const amtDisplay = t.amount < 0 ? `+${fmtCurrency(-t.amount)}` : fmtCurrency(t.amount); const status = t.pending ? `<span class="badge badge-purple">Pending</span>` : `<span class="badge badge-green">Posted</span>`; return `<tr><td>${t.date}</td><td>${t.merchant_name || "--"}</td><td>${t.name}</td><td class="${amtClass}">${amtDisplay}</td><td>${(t.category_primary||"").replace(/_/g," ")}</td><td>${t.payment_channel || "--"}</td><td>${status}</td></tr>`; }).join(""); }
+    else { body.innerHTML = slice.map(t => { const amtClass = t.amount < 0 ? "amount-pos" : "amount-neg"; const amtDisplay = t.amount < 0 ? `+${fmtCurrency(-t.amount)}` : fmtCurrency(t.amount); const status = t.pending ? `<span class="badge badge-purple">Pending</span>` : `<span class="badge badge-green">Posted</span>`; return `<tr><td>${esc(t.date)}</td><td>${esc(t.merchant_name) || "--"}</td><td>${esc(t.name)}</td><td class="${amtClass}">${amtDisplay}</td><td>${esc(titleCase(t.category_primary))}</td><td>${esc(t.payment_channel) || "--"}</td><td>${status}</td></tr>`; }).join(""); }
     const pages = Math.ceil(total / PAGE_SIZE);
     document.getElementById("pagination").innerHTML = `<span>${total.toLocaleString()} transactions</span><button onclick="prevPage()" ${page===0?"disabled":""}>Prev</button><span>Page ${page+1} of ${Math.max(1,pages)}</span><button onclick="nextPage()" ${page>=pages-1?"disabled":""}>Next</button>`;
   }
@@ -494,7 +499,7 @@ const txLast30 = TRANSACTIONS.filter(t => {
 })();
 
 // ── Chat Panel ──────────────────────────────────────────────────────────────
-const SUPABASE_FN = "https://acouuzccqkcpyrckrgwg.supabase.co/functions/v1";
+const SUPABASE_FN = "__SUPABASE_FN__";
 let chatConversation = [];
 
 function toggleChat() {
@@ -533,7 +538,7 @@ function mdToHtml(md) {
     })
     .replace(/^---$/gm, "<hr>")
     .replace(/\\n\\n/g, "<br>")
-    .replace(/^(?!<[htulbco])(.*\S.*)$/gm, "<p>$1</p>")
+    .replace(/^(?!<(?:h[1-6]|ul|ol|li|p|hr|table|thead|tbody|tr))(.*\S.*)$/gm, "<p>$1</p>")
     .replace(/<p><\/p>/g, "");
 }
 
@@ -574,6 +579,7 @@ async function syncNow() {
   btn.disabled = true;
   try {
     const res = await fetch(`${SUPABASE_FN}/plaid-sync`, { method: "POST" });
+    if (res.status === 404) throw new Error("Run `python plaid_sync.py` locally to sync");
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     if (data.new_count > 0) {
@@ -584,9 +590,12 @@ async function syncNow() {
       setTimeout(() => { btn.textContent = "↻ Sync"; btn.disabled = false; }, 2500);
     }
   } catch(e) {
-    btn.textContent = "✗ Failed";
-    btn.style.background = "var(--red)";
-    setTimeout(() => { btn.textContent = "↻ Sync"; btn.disabled = false; btn.style.background = ""; }, 3000);
+    btn.textContent = "↻ Sync";
+    btn.disabled = false;
+    const syncInfo = document.getElementById("syncInfo");
+    syncInfo.style.color = "var(--red)";
+    syncInfo.textContent = e.message;
+    setTimeout(() => { syncInfo.style.color = ""; syncInfo.textContent = LAST_SYNC ? "Last synced: " + new Date(LAST_SYNC).toLocaleString() : "No sync yet"; }, 5000);
   }
 }
 
@@ -631,11 +640,13 @@ function exportCSV() {
 </html>"""
 
 
-def build_dashboard(transactions: list[dict], last_sync: str, analysis: str = "") -> str:
+def build_dashboard(transactions: list[dict], last_sync: str, analysis: str = "", supabase_fn: str = "") -> str:
     return DASHBOARD_TEMPLATE.replace(
         "__TRANSACTIONS_JSON__",
         json.dumps(transactions, ensure_ascii=False),
     ).replace("__LAST_SYNC__", last_sync).replace(
+        "__SUPABASE_FN__", supabase_fn,
+    ).replace(
         "__AI_ANALYSIS__",
         analysis.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${") if analysis else "",
     )
@@ -701,8 +712,9 @@ def main() -> None:
         print("  Analysis saved to exports/analysis_report.md")
 
     # Regenerate dashboard
+    supabase_fn_url = f"{sb_url}/functions/v1"
     DASHBOARD_FILE.parent.mkdir(parents=True, exist_ok=True)
-    html = build_dashboard(all_txns, last_sync, analysis)
+    html = build_dashboard(all_txns, last_sync, analysis, supabase_fn=supabase_fn_url)
     DASHBOARD_FILE.write_text(html, encoding="utf-8")
     print(f"  Dashboard written to {DASHBOARD_FILE}")
     print("\nDone.")

@@ -6,8 +6,6 @@ plaid_state.json
 
 # Transaction data (can contain sensitive financial data)
 transactions.json
-# Allow public/dashboard.html for Vercel hosting
-/dashboard.html
 
 # Python
 __pycache__/

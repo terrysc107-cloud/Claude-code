@@ -1,43 +1,37 @@
 """
-plaid_analyze.py — Generate AI financial analysis using Claude API.
+plaid_analyze.py — Generate AI financial analysis using the Anthropic SDK with prompt caching.
 
-Called by plaid_sync.py after each sync. Reads transactions from Supabase,
-sends them to Claude, and returns a markdown analysis report.
+Called by plaid_sync.py after each sync. Returns a markdown analysis report.
 """
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-import requests
+import anthropic
 from dotenv import load_dotenv
 
 load_dotenv()
 
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 MODEL = "claude-sonnet-4-6"
 
 
 def analyze_transactions(transactions: list[dict]) -> str:
     """Send transactions to Claude and return a markdown analysis report."""
-    if not ANTHROPIC_API_KEY:
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
         print("  WARNING: ANTHROPIC_API_KEY not set — skipping AI analysis")
         return ""
 
-    # Summarize transactions to keep prompt size manageable
-    # Send last 90 days, max 500 transactions
-    from datetime import timedelta
+    # Last 90 days, max 500 posted transactions
     cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).date().isoformat()
     recent = [t for t in transactions if t.get("date", "") >= cutoff and not t.get("pending")]
     recent.sort(key=lambda t: t.get("date", ""), reverse=True)
     sample = recent[:500]
 
-    # Strip bulky fields to reduce token count
     slim = [
         {
             "date": t.get("date"),
-            "name": t.get("name"),
             "merchant": t.get("merchant_name") or t.get("name"),
             "amount": t.get("amount"),
             "category": t.get("category_primary"),
@@ -46,7 +40,9 @@ def analyze_transactions(transactions: list[dict]) -> str:
         for t in sample
     ]
 
-    prompt = f"""You are a personal finance analyst. Analyze the following bank transactions and provide a concise financial report.
+    system_prompt = """You are a personal finance analyst. Analyze bank transactions and provide a concise financial report in the exact markdown format requested. Be specific with amounts and actionable with recommendations."""
+
+    user_prompt = f"""Analyze the following bank transactions and provide a concise financial report.
 
 Transactions (last 90 days, {len(slim)} total):
 {json.dumps(slim, indent=2)}
@@ -69,27 +65,32 @@ List all detected recurring charges with merchant name, typical amount, and freq
 Specific, actionable recommendations to reduce spending or improve financial health.
 
 ---
-*Analysis generated: {datetime.now().strftime("%Y-%m-%d %H:%M")}*
-"""
+*Analysis generated: {datetime.now().strftime("%Y-%m-%d %H:%M")}*"""
 
-    headers = {
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-    }
-    body = {
-        "model": MODEL,
-        "max_tokens": 1500,
-        "messages": [{"role": "user", "content": prompt}],
-    }
+    client = anthropic.Anthropic(api_key=api_key)
 
-    print(f"  Calling Claude API ({MODEL}) for financial analysis...")
-    resp = requests.post(ANTHROPIC_URL, headers=headers, json=body, timeout=60)
-    if resp.status_code != 200:
-        print(f"  WARNING: Claude API error {resp.status_code}: {resp.text[:200]}")
+    print(f"  Calling Claude API ({MODEL}) with prompt caching...")
+    try:
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=3000,
+            system=[
+                {
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        usage = response.usage
+        cache_info = ""
+        if hasattr(usage, "cache_read_input_tokens") and usage.cache_read_input_tokens:
+            cache_info = f" (cache hit: {usage.cache_read_input_tokens} tokens)"
+        elif hasattr(usage, "cache_creation_input_tokens") and usage.cache_creation_input_tokens:
+            cache_info = f" (cache created: {usage.cache_creation_input_tokens} tokens)"
+        print(f"  AI analysis complete{cache_info}.")
+        return response.content[0].text
+    except anthropic.APIError as e:
+        print(f"  WARNING: Claude API error: {e}")
         return ""
-
-    data = resp.json()
-    report = data["content"][0]["text"]
-    print("  AI analysis complete.")
-    return report

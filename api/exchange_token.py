@@ -14,17 +14,17 @@ PLAID_ENVS = {
 }
 
 
-def supabase_insert(table, row):
+def supabase_upsert(table, row, on_conflict):
     url = os.environ.get("SUPABASE_URL", "")
     key = os.environ.get("SUPABASE_KEY", "")
     req = Request(
-        f"{url}/rest/v1/{table}",
+        f"{url}/rest/v1/{table}?on_conflict={on_conflict}",
         data=json.dumps(row).encode(),
         headers={
             "Content-Type": "application/json",
             "apikey": key,
             "Authorization": f"Bearer {key}",
-            "Prefer": "return=minimal",
+            "Prefer": "resolution=merge-duplicates,return=minimal",
         },
         method="POST",
     )
@@ -66,11 +66,11 @@ class handler(BaseHTTPRequestHandler):
             access_token = data["access_token"]
             item_id = data.get("item_id", "")
 
-            supabase_insert("plaid_tokens", {
+            supabase_upsert("plaid_tokens", {
                 "item_id": item_id,
                 "access_token": access_token,
                 "cursor": "",
-            })
+            }, on_conflict="item_id")
 
             self._json_response(200, {"success": True, "item_id": item_id})
 
@@ -93,6 +93,11 @@ class handler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(data).encode())
 
     def _cors_headers(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
+        origin = self.headers.get("Origin", "")
+        allowed = os.environ.get("ALLOWED_ORIGIN", "")
+        if allowed and origin == allowed:
+            self.send_header("Access-Control-Allow-Origin", origin)
+        elif not allowed:
+            self.send_header("Access-Control-Allow-Origin", origin or "*")
         self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")

@@ -64,6 +64,11 @@ class handler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(data).encode())
 
     def _cors_headers(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
+        origin = self.headers.get("Origin", "")
+        allowed = os.environ.get("ALLOWED_ORIGIN", "")
+        if allowed and origin == allowed:
+            self.send_header("Access-Control-Allow-Origin", origin)
+        elif not allowed:
+            self.send_header("Access-Control-Allow-Origin", origin or "*")
         self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
