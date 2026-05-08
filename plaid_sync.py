@@ -193,16 +193,16 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
   :root {
-    --bg: #0f1117;
-    --surface: #1a1d27;
-    --surface2: #22263a;
-    --accent: #6c63ff;
-    --accent2: #ff6584;
-    --text: #e8eaf6;
-    --muted: #8b8fa8;
-    --green: #43d98f;
-    --red: #ff6584;
-    --border: #2a2d3e;
+    --bg: #1C1714;
+    --surface: #262220;
+    --surface2: #302B28;
+    --accent: #DA7756;
+    --accent2: #C05746;
+    --text: #F5EDE6;
+    --muted: #9E8E84;
+    --green: #5ABF8A;
+    --red: #E06060;
+    --border: #3D3530;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
@@ -233,9 +233,9 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   td { padding: 10px 14px; border-top: 1px solid var(--border); font-size: 13px; }
   tr:hover td { background: var(--surface2); }
   .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
-  .badge-green { background: rgba(67,217,143,.15); color: var(--green); }
-  .badge-red { background: rgba(255,101,132,.15); color: var(--red); }
-  .badge-purple { background: rgba(108,99,255,.15); color: var(--accent); }
+  .badge-green { background: rgba(90,191,138,.15); color: var(--green); }
+  .badge-red { background: rgba(224,96,96,.15); color: var(--red); }
+  .badge-purple { background: rgba(218,119,86,.15); color: var(--accent); }
   .amount-neg { color: var(--red); }
   .amount-pos { color: var(--green); }
   .sub-table { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
@@ -251,7 +251,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
   .pagination span { font-size: 12px; color: var(--muted); }
   .ai-section { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 12px; padding: 24px 28px; margin-bottom: 24px; }
   .ai-section h2 { font-size: 13px; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
-  .ai-section .ai-badge { background: rgba(108,99,255,.15); color: var(--accent); font-size: 10px; padding: 2px 8px; border-radius: 20px; font-weight: 600; }
+  .ai-section .ai-badge { background: rgba(218,119,86,.15); color: var(--accent); font-size: 10px; padding: 2px 8px; border-radius: 20px; font-weight: 600; }
   .ai-body h2 { font-size: 15px; font-weight: 700; color: var(--text); margin: 20px 0 8px; text-transform: none; letter-spacing: 0; }
   .ai-body h2:first-child { margin-top: 0; }
   .ai-body p { font-size: 14px; color: var(--muted); line-height: 1.7; margin-bottom: 10px; }
@@ -442,7 +442,7 @@ function buildCatChart(days) {
   const map = {};
   txWindow.forEach(t => { map[t.category_primary || "OTHER"] = (map[t.category_primary || "OTHER"] || 0) + t.amount; });
   const sorted = Object.entries(map).sort((a,b) => b[1]-a[1]).slice(0, 10);
-  const colors = ["#6c63ff","#ff6584","#43d98f","#ffbb28","#ff8042","#8dd1e1","#a4de6c","#d0ed57","#ffc658","#83a6ed"];
+  const colors = ["#DA7756","#5ABF8A","#7BB3D4","#F0C070","#C05746","#8BAF7A","#D4956A","#B07060","#E0A868","#8A9EBF"];
   if (catChartInstance) catChartInstance.destroy();
   catChartInstance = new Chart(document.getElementById("catChart"), {
     type: "bar",
@@ -450,7 +450,7 @@ function buildCatChart(days) {
     options: {
       indexAxis: "y", responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtCurrency(ctx.raw) } } },
-      scales: { x: { ticks: { color: "#8b8fa8", callback: v => "$"+Math.round(v) }, grid: { color: "#2a2d3e" } }, y: { ticks: { color: "#e8eaf6" }, grid: { display: false } } }
+      scales: { x: { ticks: { color: "#9E8E84", callback: v => "$"+Math.round(v) }, grid: { color: "#3D3530" } }, y: { ticks: { color: "#F5EDE6" }, grid: { display: false } } }
     }
   });
 }
@@ -464,11 +464,11 @@ buildCatChart(30);
   const months = Object.keys(map).sort();
   new Chart(document.getElementById("trendChart"), {
     type: "line",
-    data: { labels: months, datasets: [{ data: months.map(m => map[m]), borderColor: "#6c63ff", backgroundColor: "rgba(108,99,255,.12)", fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: "#6c63ff" }] },
+    data: { labels: months, datasets: [{ data: months.map(m => map[m]), borderColor: "#DA7756", backgroundColor: "rgba(218,119,86,.12)", fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: "#DA7756" }] },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtCurrency(ctx.raw) } } },
-      scales: { x: { ticks: { color: "#8b8fa8" }, grid: { color: "#2a2d3e" } }, y: { ticks: { color: "#8b8fa8", callback: v => "$"+Math.round(v) }, grid: { color: "#2a2d3e" } } }
+      scales: { x: { ticks: { color: "#9E8E84" }, grid: { color: "#3D3530" } }, y: { ticks: { color: "#9E8E84", callback: v => "$"+Math.round(v) }, grid: { color: "#3D3530" } } }
     }
   });
 })();
