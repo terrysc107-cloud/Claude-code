@@ -4,9 +4,10 @@
   "cwd": "/home/user/Claude-code",
   "context": {},
   "metrics": {
-    "edits": 14,
+    "edits": 22,
     "commands": 0,
     "tasks": 0,
     "errors": 0
-  }
+  },
+  "restoredAt": "2026-05-08T23:02:55.895Z"
 }
