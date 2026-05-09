@@ -1,15 +1,22 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
+// Use globalThis so the singleton survives Next.js chunk-splitting in the browser
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const g = globalThis as typeof globalThis & { __sbClient?: SupabaseClient<any, "public", any> };
+
 /**
  * Browser-safe Supabase client using the anon key.
- * Safe for use in client components.
+ * Returns a singleton to avoid multiple GoTrueClient instances.
  */
 export function createBrowserClient() {
-  return createClient(supabaseUrl, supabaseAnonKey);
+  if (!g.__sbClient) {
+    g.__sbClient = createClient(supabaseUrl, supabaseAnonKey);
+  }
+  return g.__sbClient;
 }
 
 /**
