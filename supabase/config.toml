@@ -44,3 +44,9 @@ verify_jwt = false
 
 [functions.finance-chat]
 verify_jwt = false
+
+[functions.get-accounts]
+verify_jwt = false
+
+[functions.get-liabilities]
+verify_jwt = false

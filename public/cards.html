@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cards — Finance Dashboard</title>
+<style>
+  :root { --bg: #1C1714; --surface: #262220; --accent: #DA7756; --text: #F5EDE6; --muted: #9E8E84; --border: #3D3530; --green: #5ABF8A; --red: #E06060; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+  /* Nav */
+  nav { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; gap: 24px; height: 52px; }
+  .nav-logo { font-weight: 700; font-size: 15px; color: var(--accent); letter-spacing: -.02em; }
+  .nav-link { font-size: 14px; color: var(--muted); text-decoration: none; transition: color .15s; }
+  .nav-link:hover, .nav-link.active { color: var(--text); }
+  .nav-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+  .sign-out { font-size: 13px; color: var(--muted); background: none; border: none; cursor: pointer; transition: color .15s; }
+  .sign-out:hover { color: var(--red); }
+
+  /* Layout */
+  .page { max-width: 900px; margin: 0 auto; padding: 32px 20px 60px; }
+  .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; }
+  h1 { font-size: 22px; font-weight: 700; }
+  .add-btn { background: var(--accent); color: #fff; border: none; border-radius: 8px; padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity .2s; }
+  .add-btn:hover { opacity: .85; }
+
+  /* Summary bar */
+  .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 32px; }
+  .sum-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; }
+  .sum-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+  .sum-val { font-size: 22px; font-weight: 700; }
+  .sum-val.good { color: var(--green); }
+  .sum-val.warn { color: var(--accent); }
+  .sum-val.bad { color: var(--red); }
+
+  /* Card grid */
+  .cards-grid { display: grid; gap: 20px; }
+  .card-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+  .card-header { display: flex; align-items: flex-start; gap: 16px; padding: 20px 20px 16px; cursor: pointer; }
+  .card-chip { width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+  .card-meta { flex: 1; min-width: 0; }
+  .card-name { font-size: 16px; font-weight: 600; }
+  .card-sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .card-balance-block { text-align: right; flex-shrink: 0; }
+  .card-balance { font-size: 20px; font-weight: 700; }
+  .card-limit { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .chevron { color: var(--muted); font-size: 18px; transition: transform .2s; align-self: center; }
+  .card-panel.open .chevron { transform: rotate(180deg); }
+
+  /* Utilization bar */
+  .util-bar { height: 4px; background: var(--border); margin: 0 20px 0; border-radius: 2px; overflow: hidden; }
+  .util-fill { height: 100%; border-radius: 2px; transition: width .4s; }
+
+  /* Body sections */
+  .card-body { display: none; padding: 0 20px 20px; }
+  .card-panel.open .card-body { display: block; }
+
+  .section-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; margin: 18px 0 10px; }
+
+  /* Rewards */
+  .rewards-row { display: flex; align-items: center; gap: 12px; }
+  .rewards-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; color: var(--text); font-size: 15px; outline: none; }
+  .rewards-input:focus { border-color: var(--accent); }
+  .rewards-type { font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .save-btn { background: var(--accent); color: #fff; border: none; border-radius: 8px; padding: 9px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .save-btn:hover { opacity: .85; }
+  .rewards-updated { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+  /* Liabilities */
+  .liab-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .liab-item { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+  .liab-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+  .liab-val { font-size: 16px; font-weight: 600; }
+
+  /* Benefits */
+  .benefits-list { display: flex; flex-direction: column; gap: 8px; }
+  .benefit-row { display: flex; align-items: center; gap: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 11px 14px; transition: border-color .15s; }
+  .benefit-row.redeemed { border-color: var(--green); background: rgba(90,191,138,.06); }
+  .benefit-cb { width: 18px; height: 18px; accent-color: var(--green); cursor: pointer; flex-shrink: 0; }
+  .benefit-info { flex: 1; min-width: 0; }
+  .benefit-name { font-size: 14px; font-weight: 500; }
+  .benefit-name.done { text-decoration: line-through; color: var(--muted); }
+  .benefit-desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .benefit-val { font-size: 13px; font-weight: 600; color: var(--green); white-space: nowrap; }
+  .benefit-val.done { color: var(--muted); }
+  .benefit-actions { display: flex; gap: 6px; }
+  .icon-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; padding: 2px 4px; transition: color .15s; }
+  .icon-btn:hover { color: var(--text); }
+  .add-benefit-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .add-benefit-row input { flex: 1; min-width: 140px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; color: var(--text); font-size: 13px; outline: none; }
+  .add-benefit-row input:focus { border-color: var(--accent); }
+  .add-benefit-row input::placeholder { color: var(--muted); }
+
+  /* Progress */
+  .benefits-progress { margin-top: 14px; }
+  .prog-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; display: flex; justify-content: space-between; }
+  .prog-track { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .prog-fill { height: 100%; background: var(--green); border-radius: 3px; transition: width .4s; }
+
+  /* Empty / loading */
+  .empty { text-align: center; padding: 60px 20px; color: var(--muted); }
+  .empty h2 { font-size: 18px; color: var(--text); margin-bottom: 10px; }
+  .spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Modal */
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
+  .modal-bg.hidden { display: none; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; max-width: 480px; width: 100%; max-height: 90vh; overflow-y: auto; }
+  .modal h2 { font-size: 18px; margin-bottom: 20px; }
+  .form-field { margin-bottom: 16px; }
+  .form-field label { display: block; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
+  .form-field input, .form-field select { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; color: var(--text); font-size: 14px; outline: none; }
+  .form-field input:focus, .form-field select:focus { border-color: var(--accent); }
+  .form-field select option { background: var(--surface); }
+  .modal-row { display: flex; gap: 12px; }
+  .modal-row .form-field { flex: 1; }
+  .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+  .modal-actions button { flex: 1; padding: 12px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-cancel { background: var(--bg); color: var(--muted); border: 1px solid var(--border) !important; }
+  .template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; margin-bottom: 16px; }
+  .template-btn { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; text-align: left; cursor: pointer; color: var(--text); font-size: 13px; transition: border-color .15s; }
+  .template-btn:hover { border-color: var(--accent); }
+  .template-btn .t-name { font-weight: 600; }
+  .template-btn .t-count { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="nav-logo">💳 Finance</span>
+  <a href="/dashboard.html" class="nav-link">Dashboard</a>
+  <a href="/cards.html" class="nav-link active">Cards</a>
+  <div class="nav-right">
+    <button class="sign-out" onclick="signOut()">Sign out</button>
+  </div>
+</nav>
+
+<div class="page">
+  <div class="page-header">
+    <h1>My Cards</h1>
+    <button class="add-btn" onclick="openAddModal()">+ Add Card</button>
+  </div>
+
+  <!-- Summary bar -->
+  <div class="summary" id="summaryBar">
+    <div class="sum-card"><div class="sum-label">Total Balance</div><div class="sum-val" id="sumBalance">—</div></div>
+    <div class="sum-card"><div class="sum-label">Total Credit Limit</div><div class="sum-val" id="sumLimit">—</div></div>
+    <div class="sum-card"><div class="sum-label">Benefits Redeemed</div><div class="sum-val good" id="sumRedeemed">—</div></div>
+    <div class="sum-card"><div class="sum-label">Benefits Remaining</div><div class="sum-val warn" id="sumRemaining">—</div></div>
+  </div>
+
+  <!-- Cards -->
+  <div class="cards-grid" id="cardsGrid">
+    <div class="empty"><span class="spinner"></span></div>
+  </div>
+</div>
+
+<!-- Add Card Modal -->
+<div class="modal-bg hidden" id="addModal">
+  <div class="modal">
+    <h2>Add a Card</h2>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">Pick a template to auto-fill benefits, or add manually.</p>
+    <div class="template-grid" id="templateGrid"></div>
+    <hr class="divider">
+    <div class="modal-row">
+      <div class="form-field">
+        <label>Card Name</label>
+        <input id="newName" placeholder="Chase Sapphire Reserve">
+      </div>
+    </div>
+    <div class="modal-row">
+      <div class="form-field">
+        <label>Issuer</label>
+        <input id="newIssuer" placeholder="Chase">
+      </div>
+      <div class="form-field">
+        <label>Network</label>
+        <select id="newNetwork">
+          <option value="">—</option>
+          <option>Visa</option><option>Mastercard</option><option>Amex</option><option>Discover</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-row">
+      <div class="form-field">
+        <label>Last 4 Digits</label>
+        <input id="newLast4" maxlength="4" placeholder="1234">
+      </div>
+      <div class="form-field">
+        <label>Rewards Type</label>
+        <select id="newRewardsType">
+          <option value="points">Points</option>
+          <option value="miles">Miles</option>
+          <option value="cashback">Cash Back</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeAddModal()">Cancel</button>
+      <button class="btn-primary" onclick="addCard()">Add Card</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL = "https://acouuzccqkcpyrckrgwg.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFjb3V1emNjcWtjcHlyY2tyZ3dnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3ODYwMjksImV4cCI6MjA4OTM2MjAyOX0.Nr96gJN4--F83QhQ-E8dP9wbMhsSAXvcThoq0SVUtLM";
+const FN = "https://acouuzccqkcpyrckrgwg.supabase.co/functions/v1";
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+// Auth guard
+sb.auth.getSession().then(({ data: { session } }) => {
+  if (!session) window.location.href = "/login.html";
+  else init();
+});
+
+async function signOut() {
+  await sb.auth.signOut();
+  window.location.href = "/login.html";
+}
+
+// ── Card benefit templates ────────────────────────────────────────────────
+const TEMPLATES = {
+  "Chase Sapphire Reserve": {
+    issuer: "Chase", network: "Visa", rewards_type: "points",
+    benefits: [
+      { name: "$300 Annual Travel Credit", annual_value: 300, reset_type: "calendar_year", description: "Applies automatically to travel purchases" },
+      { name: "Global Entry / TSA PreCheck Credit", annual_value: 100, reset_type: "anniversary", description: "$100 every 4 years" },
+      { name: "Priority Pass Select", annual_value: 429, reset_type: "anniversary", description: "Unlimited airport lounge access" },
+      { name: "DashPass Membership", annual_value: 120, reset_type: "calendar_year", description: "$0 delivery fees on DoorDash" },
+      { name: "Lyft Pink Credit", annual_value: 60, reset_type: "calendar_year", description: "10% off Lyft rides" },
+    ]
+  },
+  "Chase Sapphire Preferred": {
+    issuer: "Chase", network: "Visa", rewards_type: "points",
+    benefits: [
+      { name: "$50 Annual Hotel Credit", annual_value: 50, reset_type: "calendar_year", description: "Via Chase Travel portal" },
+      { name: "$10/mo Dining Credit", annual_value: 120, reset_type: "monthly", description: "Select partners: Caviar, DoorDash, etc." },
+      { name: "DashPass Membership", annual_value: 96, reset_type: "calendar_year" },
+    ]
+  },
+  "Amex Platinum": {
+    issuer: "American Express", network: "Amex", rewards_type: "points",
+    benefits: [
+      { name: "$200 Hotel Credit", annual_value: 200, reset_type: "calendar_year", description: "Fine Hotels + Resorts or The Hotel Collection" },
+      { name: "$200 Airline Fee Credit", annual_value: 200, reset_type: "calendar_year", description: "Select one airline per calendar year" },
+      { name: "$240 Digital Entertainment Credit", annual_value: 240, reset_type: "monthly", description: "$20/mo: Disney+, Hulu, ESPN+, etc." },
+      { name: "$155 Walmart+ Credit", annual_value: 155, reset_type: "monthly", description: "$12.95/mo credit" },
+      { name: "$189 CLEAR Plus Credit", annual_value: 189, reset_type: "calendar_year" },
+      { name: "Global Entry / TSA PreCheck Credit", annual_value: 100, reset_type: "anniversary", description: "$100 every 4 years" },
+      { name: "Priority Pass Select", annual_value: 429, reset_type: "anniversary", description: "Unlimited airport lounge access" },
+      { name: "Centurion Lounge Access", annual_value: 0, reset_type: "anniversary", description: "Complimentary with Platinum card" },
+    ]
+  },
+  "Amex Gold": {
+    issuer: "American Express", network: "Amex", rewards_type: "points",
+    benefits: [
+      { name: "$120 Dining Credit", annual_value: 120, reset_type: "monthly", description: "$10/mo at Grubhub, The Cheesecake Factory, etc." },
+      { name: "$120 Uber Cash", annual_value: 120, reset_type: "monthly", description: "$10/mo in Uber Cash added to Amex account" },
+      { name: "$100 Hotel Collection Credit", annual_value: 100, reset_type: "anniversary", description: "The Hotel Collection (2-night min)" },
+    ]
+  },
+  "Capital One Venture X": {
+    issuer: "Capital One", network: "Visa", rewards_type: "miles",
+    benefits: [
+      { name: "$300 Annual Travel Credit", annual_value: 300, reset_type: "calendar_year", description: "Bookings via Capital One Travel" },
+      { name: "10,000 Anniversary Miles", annual_value: 100, reset_type: "anniversary", description: "Credited each account anniversary" },
+      { name: "Global Entry / TSA PreCheck Credit", annual_value: 100, reset_type: "anniversary", description: "$100 every 4 years" },
+      { name: "Priority Pass Select", annual_value: 429, reset_type: "anniversary", description: "Unlimited airport lounge + guest access" },
+    ]
+  },
+  "Citi Double Cash": {
+    issuer: "Citi", network: "Mastercard", rewards_type: "cashback",
+    benefits: [
+      { name: "2% Cash Back", annual_value: 0, reset_type: "calendar_year", description: "1% on purchase + 1% when paid" },
+    ]
+  },
+};
+
+// ── State ─────────────────────────────────────────────────────────────────
+let cards = [];
+let benefitsMap = {}; // card_id → benefits[]
+let liabilitiesMap = {}; // plaid_account_id → liability data
+let selectedTemplate = null;
+
+async function init() {
+  await Promise.all([loadCards(), loadLiabilities()]);
+  renderCards();
+}
+
+async function loadCards() {
+  const { data } = await sb.from("cards").select("*").order("created_at");
+  cards = data || [];
+  const ids = cards.map(c => c.id);
+  if (ids.length) {
+    const { data: ben } = await sb.from("card_benefits").select("*").in("card_id", ids).order("sort_order");
+    (ben || []).forEach(b => { if (!benefitsMap[b.card_id]) benefitsMap[b.card_id] = []; benefitsMap[b.card_id].push(b); });
+  }
+}
+
+async function loadLiabilities() {
+  try {
+    const res = await fetch(`${FN}/get-liabilities`, { method: "POST" });
+    if (!res.ok) return;
+    const data = await res.json();
+    (data.liabilities || []).forEach(l => { liabilitiesMap[l.account_id] = l; });
+  } catch {}
+}
+
+// ── Render ─────────────────────────────────────────────────────────────────
+function fmtCurrency(v) {
+  if (v == null) return "—";
+  return "$" + Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function esc(s) { const d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }
+
+function renderCards() {
+  const grid = document.getElementById("cardsGrid");
+  if (!cards.length) {
+    grid.innerHTML = `<div class="empty"><h2>No cards yet</h2><p>Add your first card to start tracking benefits and rewards.</p></div>`;
+    updateSummary();
+    return;
+  }
+  grid.innerHTML = cards.map(c => cardHTML(c)).join("");
+  updateSummary();
+}
+
+function cardHTML(c) {
+  const benefits = benefitsMap[c.id] || [];
+  const liab = c.plaid_account_id ? liabilitiesMap[c.plaid_account_id] : null;
+  const balance = liab ? liab.last_statement_balance : null;
+  const limit = liab ? liab.credit_limit : null;
+  const utilPct = (balance && limit) ? Math.min(100, (balance / limit) * 100) : 0;
+  const utilColor = utilPct > 70 ? "var(--red)" : utilPct > 40 ? "var(--accent)" : "var(--green)";
+
+  const totalVal = benefits.reduce((s, b) => s + (b.annual_value || 0), 0);
+  const redeemedVal = benefits.filter(b => b.redeemed).reduce((s, b) => s + (b.annual_value || 0), 0);
+  const progPct = totalVal ? Math.round((redeemedVal / totalVal) * 100) : 0;
+
+  const updatedStr = c.rewards_updated_at
+    ? "Updated " + new Date(c.rewards_updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    : "Not updated yet";
+  const rwLabel = c.rewards_type === "cashback" ? "Cash Back" : c.rewards_type === "miles" ? "Miles" : "Points";
+
+  const bgColor = c.color || "#DA7756";
+
+  const benefitsHTML = benefits.map(b => `
+    <div class="benefit-row${b.redeemed ? " redeemed" : ""}" id="brow-${esc(b.id)}">
+      <input type="checkbox" class="benefit-cb" ${b.redeemed ? "checked" : ""} onchange="toggleBenefit('${esc(b.id)}', '${esc(c.id)}', this.checked)">
+      <div class="benefit-info">
+        <div class="benefit-name${b.redeemed ? " done" : ""}">${esc(b.name)}</div>
+        ${b.description ? `<div class="benefit-desc">${esc(b.description)}</div>` : ""}
+        ${b.reset_type !== "anniversary" ? `<div class="benefit-desc">Resets: ${esc(b.reset_type.replace("_", " "))}</div>` : ""}
+      </div>
+      ${b.annual_value ? `<div class="benefit-val${b.redeemed ? " done" : ""}">$${b.annual_value}</div>` : ""}
+      <div class="benefit-actions">
+        <button class="icon-btn" onclick="deleteBenefit('${esc(b.id)}', '${esc(c.id)}')" title="Delete">✕</button>
+      </div>
+    </div>`).join("");
+
+  return `
+  <div class="card-panel" id="cpanel-${esc(c.id)}">
+    <div class="card-header" onclick="togglePanel('${esc(c.id)}')">
+      <div class="card-chip" style="background:${bgColor}22;color:${bgColor}">💳</div>
+      <div class="card-meta">
+        <div class="card-name">${esc(c.name)}</div>
+        <div class="card-sub">${esc(c.issuer || "")}${c.network ? " · " + esc(c.network) : ""}${c.last4 ? " ···· " + esc(c.last4) : ""}</div>
+      </div>
+      <div class="card-balance-block">
+        ${balance != null ? `<div class="card-balance">${fmtCurrency(balance)}</div><div class="card-limit">of ${fmtCurrency(limit)} limit</div>` : `<div class="card-sub" style="font-size:14px">${c.rewards_balance ? c.rewards_balance.toLocaleString() + " " + rwLabel : "No balance"}</div>`}
+      </div>
+      <div class="chevron">⌄</div>
+    </div>
+
+    ${utilPct > 0 ? `<div class="util-bar"><div class="util-fill" style="width:${utilPct}%;background:${utilColor}"></div></div>` : ""}
+
+    <div class="card-body">
+      <!-- Rewards -->
+      <div class="section-title">Rewards Balance</div>
+      <div class="rewards-row">
+        <input class="rewards-input" id="rw-${esc(c.id)}" type="number" value="${c.rewards_balance || 0}" min="0" placeholder="0">
+        <span class="rewards-type">${esc(rwLabel)}</span>
+        <button class="save-btn" onclick="saveRewards('${esc(c.id)}')">Save</button>
+      </div>
+      <div class="rewards-updated" id="rwup-${esc(c.id)}">${esc(updatedStr)}</div>
+
+      <!-- Liabilities from Plaid -->
+      ${liab ? `
+      <div class="section-title">Statement Details</div>
+      <div class="liab-grid">
+        ${liab.minimum_payment_amount != null ? `<div class="liab-item"><div class="liab-label">Min Payment</div><div class="liab-val">${fmtCurrency(liab.minimum_payment_amount)}</div></div>` : ""}
+        ${liab.next_payment_due_date ? `<div class="liab-item"><div class="liab-label">Due Date</div><div class="liab-val">${esc(liab.next_payment_due_date)}</div></div>` : ""}
+        ${liab.aprs && liab.aprs[0] ? `<div class="liab-item"><div class="liab-label">Purchase APR</div><div class="liab-val">${liab.aprs[0].apr_percentage}%</div></div>` : ""}
+        ${liab.last_statement_balance != null ? `<div class="liab-item"><div class="liab-label">Statement Balance</div><div class="liab-val">${fmtCurrency(liab.last_statement_balance)}</div></div>` : ""}
+      </div>` : ""}
+
+      <!-- Benefits -->
+      <div class="section-title" style="display:flex;align-items:center;justify-content:space-between">
+        <span>Annual Benefits</span>
+        <span style="font-size:12px;color:var(--muted)">${totalVal ? "$" + redeemedVal + " / $" + totalVal + " redeemed" : ""}</span>
+      </div>
+
+      ${totalVal ? `<div class="benefits-progress"><div class="prog-track"><div class="prog-fill" style="width:${progPct}%"></div></div></div>` : ""}
+
+      <div class="benefits-list" style="margin-top:10px">${benefitsHTML}</div>
+
+      <!-- Add benefit -->
+      <div class="add-benefit-row" id="addbr-${esc(c.id)}">
+        <input placeholder="Benefit name" id="bnname-${esc(c.id)}">
+        <input placeholder="$value" type="number" min="0" id="bnval-${esc(c.id)}" style="max-width:90px">
+        <button class="save-btn" onclick="addBenefit('${esc(c.id)}')">Add</button>
+      </div>
+
+      <!-- Delete card -->
+      <div style="margin-top:18px;text-align:right">
+        <button class="icon-btn" style="font-size:12px;color:var(--muted)" onclick="deleteCard('${esc(c.id)}')">Remove card</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function updateSummary() {
+  let totalBal = 0, totalLim = 0, redeemed = 0, remaining = 0;
+  let hasBal = false;
+  cards.forEach(c => {
+    const liab = c.plaid_account_id ? liabilitiesMap[c.plaid_account_id] : null;
+    if (liab) {
+      hasBal = true;
+      totalBal += liab.last_statement_balance || 0;
+      totalLim += liab.credit_limit || 0;
+    }
+    (benefitsMap[c.id] || []).forEach(b => {
+      if (b.redeemed) redeemed += b.annual_value || 0;
+      else remaining += b.annual_value || 0;
+    });
+  });
+  document.getElementById("sumBalance").textContent = hasBal ? fmtCurrency(totalBal) : "—";
+  document.getElementById("sumLimit").textContent = hasBal ? fmtCurrency(totalLim) : "—";
+  document.getElementById("sumRedeemed").textContent = "$" + redeemed.toLocaleString();
+  document.getElementById("sumRemaining").textContent = "$" + remaining.toLocaleString();
+}
+
+// ── Panel toggle ───────────────────────────────────────────────────────────
+function togglePanel(id) {
+  document.getElementById("cpanel-" + id).classList.toggle("open");
+}
+
+// ── Rewards ────────────────────────────────────────────────────────────────
+async function saveRewards(cardId) {
+  const val = parseFloat(document.getElementById("rw-" + cardId).value) || 0;
+  const now = new Date().toISOString();
+  await sb.from("cards").update({ rewards_balance: val, rewards_updated_at: now }).eq("id", cardId);
+  const c = cards.find(x => x.id === cardId);
+  if (c) { c.rewards_balance = val; c.rewards_updated_at = now; }
+  const rwLabel = { points: "Points", miles: "Miles", cashback: "Cash Back" }[c?.rewards_type] || "Points";
+  document.getElementById("rwup-" + cardId).textContent = "Updated " + new Date(now).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+// ── Benefits ───────────────────────────────────────────────────────────────
+async function toggleBenefit(benId, cardId, checked) {
+  const now = checked ? new Date().toISOString() : null;
+  await sb.from("card_benefits").update({ redeemed: checked, redeemed_at: now }).eq("id", benId);
+  const bens = benefitsMap[cardId] || [];
+  const b = bens.find(x => x.id === benId);
+  if (b) { b.redeemed = checked; b.redeemed_at = now; }
+  // Refresh just this card's panel
+  const panel = document.getElementById("cpanel-" + cardId);
+  const wasOpen = panel.classList.contains("open");
+  const card = cards.find(c => c.id === cardId);
+  panel.outerHTML = cardHTML(card);
+  const newPanel = document.getElementById("cpanel-" + cardId);
+  if (wasOpen) newPanel.classList.add("open");
+  updateSummary();
+}
+
+async function addBenefit(cardId) {
+  const nameEl = document.getElementById("bnname-" + cardId);
+  const valEl = document.getElementById("bnval-" + cardId);
+  const name = nameEl.value.trim();
+  if (!name) return;
+  const annual_value = parseFloat(valEl.value) || 0;
+  const sort_order = (benefitsMap[cardId] || []).length;
+  const { data } = await sb.from("card_benefits").insert({ card_id: cardId, name, annual_value, sort_order }).select().single();
+  if (data) {
+    if (!benefitsMap[cardId]) benefitsMap[cardId] = [];
+    benefitsMap[cardId].push(data);
+    nameEl.value = ""; valEl.value = "";
+    const panel = document.getElementById("cpanel-" + cardId);
+    const wasOpen = panel.classList.contains("open");
+    panel.outerHTML = cardHTML(cards.find(c => c.id === cardId));
+    const newPanel = document.getElementById("cpanel-" + cardId);
+    if (wasOpen) newPanel.classList.add("open");
+    updateSummary();
+  }
+}
+
+async function deleteBenefit(benId, cardId) {
+  await sb.from("card_benefits").delete().eq("id", benId);
+  benefitsMap[cardId] = (benefitsMap[cardId] || []).filter(b => b.id !== benId);
+  const panel = document.getElementById("cpanel-" + cardId);
+  const wasOpen = panel.classList.contains("open");
+  panel.outerHTML = cardHTML(cards.find(c => c.id === cardId));
+  if (document.getElementById("cpanel-" + cardId) && wasOpen)
+    document.getElementById("cpanel-" + cardId).classList.add("open");
+  updateSummary();
+}
+
+// ── Add card modal ─────────────────────────────────────────────────────────
+function openAddModal() {
+  selectedTemplate = null;
+  document.getElementById("newName").value = "";
+  document.getElementById("newIssuer").value = "";
+  document.getElementById("newLast4").value = "";
+  document.getElementById("newNetwork").value = "";
+  document.getElementById("newRewardsType").value = "points";
+  renderTemplates();
+  document.getElementById("addModal").classList.remove("hidden");
+}
+
+function closeAddModal() { document.getElementById("addModal").classList.add("hidden"); }
+
+function renderTemplates() {
+  const grid = document.getElementById("templateGrid");
+  grid.innerHTML = Object.entries(TEMPLATES).map(([name, t]) => `
+    <button class="template-btn" onclick="applyTemplate('${esc(name)}')" id="tmpl-${esc(name).replace(/\s/g,'_')}">
+      <div class="t-name">${esc(name)}</div>
+      <div class="t-count">${t.benefits.length} benefits</div>
+    </button>`).join("");
+}
+
+function applyTemplate(name) {
+  selectedTemplate = name;
+  const t = TEMPLATES[name];
+  document.getElementById("newName").value = name;
+  document.getElementById("newIssuer").value = t.issuer || "";
+  document.getElementById("newNetwork").value = t.network || "";
+  document.getElementById("newRewardsType").value = t.rewards_type || "points";
+  // highlight selected
+  document.querySelectorAll(".template-btn").forEach(el => el.style.borderColor = "");
+  const key = name.replace(/\s/g, "_");
+  const btn = document.getElementById("tmpl-" + key);
+  if (btn) btn.style.borderColor = "var(--accent)";
+}
+
+async function addCard() {
+  const name = document.getElementById("newName").value.trim();
+  if (!name) return alert("Card name is required");
+  const payload = {
+    name,
+    issuer: document.getElementById("newIssuer").value.trim() || null,
+    network: document.getElementById("newNetwork").value || null,
+    last4: document.getElementById("newLast4").value.trim() || null,
+    rewards_type: document.getElementById("newRewardsType").value,
+  };
+  const { data: card } = await sb.from("cards").insert(payload).select().single();
+  if (!card) return;
+  cards.push(card);
+  benefitsMap[card.id] = [];
+  // Insert template benefits
+  if (selectedTemplate && TEMPLATES[selectedTemplate]) {
+    const bens = TEMPLATES[selectedTemplate].benefits.map((b, i) => ({ ...b, card_id: card.id, sort_order: i }));
+    const { data: inserted } = await sb.from("card_benefits").insert(bens).select();
+    benefitsMap[card.id] = inserted || [];
+  }
+  closeAddModal();
+  renderCards();
+}
+
+async function deleteCard(cardId) {
+  if (!confirm("Remove this card and all its benefits?")) return;
+  await sb.from("cards").delete().eq("id", cardId);
+  cards = cards.filter(c => c.id !== cardId);
+  delete benefitsMap[cardId];
+  renderCards();
+}
+</script>
+</body>
+</html>

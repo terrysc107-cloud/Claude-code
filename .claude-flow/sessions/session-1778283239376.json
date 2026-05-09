@@ -1,0 +1,14 @@
+{
+  "id": "session-1778283239376",
+  "startedAt": "2026-05-08T23:33:59.376Z",
+  "cwd": "/home/user/Claude-code",
+  "context": {},
+  "metrics": {
+    "edits": 0,
+    "commands": 0,
+    "tasks": 0,
+    "errors": 0
+  },
+  "endedAt": "2026-05-08T23:45:29.301Z",
+  "duration": 689925
+}
