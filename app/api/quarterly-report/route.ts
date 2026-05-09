@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient, CLIENT_ID } from "@/lib/supabase";
 import { createAnthropicClient, CLAUDE_MODEL } from "@/lib/anthropic";
@@ -109,15 +110,22 @@ Be direct. Numbers-anchored. No generic advice. Use exact figures from the data.
     const reportContent =
       message.content[0].type === "text" ? message.content[0].text : "";
 
-    // Save to ai_insights
-    await supabase.from("north_star.ai_insights").insert({
-      client_id: CLIENT_ID,
-      session_date: new Date().toISOString().split("T")[0],
-      insight_type: "quarterly_report",
-      topic: `${quarter} ${year} Quarterly Report`,
-      insight: reportContent,
-      tags: [quarter, String(year), "quarterly_report"],
-    });
+    // Save to ai_insights (best effort — don't fail the response if this errors)
+    try {
+      await supabase
+        .schema("north_star")
+        .from("ai_insights")
+        .insert({
+          client_id: CLIENT_ID,
+          session_date: new Date().toISOString().split("T")[0],
+          insight_type: "quarterly_report",
+          topic: `${quarter} ${year} Quarterly Report`,
+          insight: reportContent,
+          tags: [quarter, String(year), "quarterly_report"],
+        });
+    } catch (saveErr) {
+      console.warn("Failed to save quarterly report to ai_insights:", saveErr);
+    }
 
     return NextResponse.json({
       report: reportContent,

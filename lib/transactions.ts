@@ -11,24 +11,16 @@ const APPLE_CASH_FILTER = "apple cash sent";
 
 // ─── Raw Queries (server-side, pass in supabase client) ──────────────────────
 
-export interface SupabaseClient {
-  from: (table: string) => {
-    select: (cols: string) => {
-      gte?: (col: string, val: string) => unknown;
-      lte?: (col: string, val: string) => unknown;
-      eq?: (col: string, val: unknown) => unknown;
-      ilike?: (col: string, val: string) => unknown;
-      not?: (col: string, filter: string, val: string) => unknown;
-      order?: (col: string, opts?: { ascending?: boolean }) => unknown;
-    };
-  };
-}
+// Using a structural duck-type interface so this works with both
+// createBrowserClient() and createServerClient() return types.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AnySupabaseClient = any;
 
 /**
  * Fetch transactions for a date range, excluding Apple Cash
  */
 export async function fetchTransactions(
-  supabase: ReturnType<typeof import("@supabase/supabase-js").createClient>,
+  supabase: AnySupabaseClient,
   startDate: string,
   endDate: string
 ): Promise<Transaction[]> {
@@ -52,7 +44,7 @@ export async function fetchTransactions(
  * Fetch last N months of transactions
  */
 export async function fetchLastNMonthsTransactions(
-  supabase: ReturnType<typeof import("@supabase/supabase-js").createClient>,
+  supabase: AnySupabaseClient,
   n: number
 ): Promise<Transaction[]> {
   const now = new Date();

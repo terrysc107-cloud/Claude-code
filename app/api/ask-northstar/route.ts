@@ -1,8 +1,9 @@
+export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient, CLIENT_ID } from "@/lib/supabase";
 import { createAnthropicClient, CLAUDE_MODEL, CFO_SYSTEM_PROMPT } from "@/lib/anthropic";
-import { fetchLastNMonthsTransactions, buildTransactionSummary } from "@/lib/transactions";
-import type { AskNorthStarRequest, ContextStoreEntry, NetWorthSnapshot, Goal } from "@/types";
+import { buildTransactionSummary, separateIncomeAndSpending, groupByCategory, getTopMerchants } from "@/lib/transactions";
+import type { AskNorthStarRequest, ContextStoreEntry, NetWorthSnapshot, Goal, Transaction } from "@/types";
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,8 +20,14 @@ export async function POST(request: NextRequest) {
     const supabase = createServerClient();
     const anthropic = createAnthropicClient();
 
+    // Calculate date range for last 90 days
+    const now = new Date();
+    const ninetyDaysAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+    const startDate = ninetyDaysAgo.toISOString().split("T")[0];
+    const endDate = now.toISOString().split("T")[0];
+
     // Load context in parallel
-    const [contextResult, netWorthResult, goalsResult, transactionsResult] =
+    const [contextResult, netWorthResult, goalsResult, txResult] =
       await Promise.all([
         supabase
           .schema("north_star")
@@ -40,8 +47,15 @@ export async function POST(request: NextRequest) {
           .select("*")
           .eq("client_id", CLIENT_ID)
           .eq("status", "active"),
-        fetchLastNMonthsTransactions(supabase, 3),
+        supabase
+          .from("transactions")
+          .select("*")
+          .gte("date", startDate)
+          .lte("date", endDate)
+          .not("name", "ilike", "%apple cash sent%"),
       ]);
+
+    const transactionsResult = (txResult.data as Transaction[] | null) ?? [];
 
     // Build context dump
     const contextEntries = (contextResult.data as ContextStoreEntry[] | null) ?? [];
