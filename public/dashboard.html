@@ -6,6 +6,22 @@
 <title>Financial Dashboard</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f1117'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='system-ui' font-size='18' font-weight='700' fill='%236c63ff'%3E%24%3C/text%3E%3C/svg%3E">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+(function() {
+  const SUPABASE_URL = "https://acouuzccqkcpyrckrgwg.supabase.co";
+  const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFjb3V1emNjcWtjcHlyY2tyZ3dnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3ODYwMjksImV4cCI6MjA4OTM2MjAyOX0.Nr96gJN4--F83QhQ-E8dP9wbMhsSAXvcThoq0SVUtLM";
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+  sb.auth.getSession().then(({ data: { session } }) => {
+    if (!session) window.location.href = "/login.html";
+  });
+  window._sb = sb;
+})();
+async function signOut() {
+  await window._sb.auth.signOut();
+  window.location.href = "/login.html";
+}
+</script>
 <style>
   :root {
     --bg: #0f1117;
@@ -119,10 +135,12 @@
 <header>
   <h1>Financial Dashboard</h1>
   <div class="header-actions">
+    <a href="/cards.html" class="btn" style="text-decoration:none">&#x1F4B3; Cards</a>
     <span class="sync-info" id="syncInfo"></span>
     <button class="btn btn-sync" onclick="syncNow()">&#x21BB; Sync</button>
     <button class="btn btn-export" onclick="exportCSV()">&#x2193; Export CSV</button>
     <button class="btn btn-chat" onclick="toggleChat()">&#x1F4AC; Ask AI</button>
+    <button class="btn" style="color:var(--muted)" onclick="signOut()">Sign out</button>
   </div>
 </header>
 <main>
@@ -165,6 +183,7 @@
           <th data-col="name">Description <span class="sort-arrow"></span></th>
           <th data-col="amount">Amount <span class="sort-arrow"></span></th>
           <th data-col="category_primary">Category <span class="sort-arrow"></span></th>
+          <th data-col="account_id">Account <span class="sort-arrow"></span></th>
           <th data-col="payment_channel">Channel <span class="sort-arrow"></span></th>
           <th data-col="pending">Status <span class="sort-arrow"></span></th>
         </tr>
@@ -393,8 +412,8 @@ const txLast30 = TRANSACTIONS.filter(t => {
   function render() {
     sortData(); const total = filtered.length; const start = page * PAGE_SIZE; const slice = filtered.slice(start, start + PAGE_SIZE);
     const body = document.getElementById("txBody");
-    if (!slice.length) { body.innerHTML = `<tr><td colspan="7" class="empty">No transactions found.</td></tr>`; }
-    else { body.innerHTML = slice.map(t => { const amtClass = t.amount < 0 ? "amount-pos" : "amount-neg"; const amtDisplay = t.amount < 0 ? `+${fmtCurrency(-t.amount)}` : fmtCurrency(t.amount); const status = t.pending ? `<span class="badge badge-purple">Pending</span>` : `<span class="badge badge-green">Posted</span>`; return `<tr><td>${t.date}</td><td>${t.merchant_name || "--"}</td><td>${t.name}</td><td class="${amtClass}">${amtDisplay}</td><td>${(t.category_primary||"").replace(/_/g," ")}</td><td>${t.payment_channel || "--"}</td><td>${status}</td></tr>`; }).join(""); }
+    if (!slice.length) { body.innerHTML = `<tr><td colspan="8" class="empty">No transactions found.</td></tr>`; }
+    else { body.innerHTML = slice.map(t => { const amtClass = t.amount < 0 ? "amount-pos" : "amount-neg"; const amtDisplay = t.amount < 0 ? `+${fmtCurrency(-t.amount)}` : fmtCurrency(t.amount); const status = t.pending ? `<span class="badge badge-purple">Pending</span>` : `<span class="badge badge-green">Posted</span>`; const acct = window._accountMap && window._accountMap[t.account_id] ? window._accountMap[t.account_id] : (t.account_id ? t.account_id.slice(-4) : "--"); return `<tr><td>${t.date}</td><td>${t.merchant_name || "--"}</td><td>${t.name}</td><td class="${amtClass}">${amtDisplay}</td><td>${(t.category_primary||"").replace(/_/g," ")}</td><td style="font-size:12px;color:var(--muted)">${acct}</td><td>${t.payment_channel || "--"}</td><td>${status}</td></tr>`; }).join(""); }
     const pages = Math.ceil(total / PAGE_SIZE);
     document.getElementById("pagination").innerHTML = `<span>${total.toLocaleString()} transactions</span><button onclick="prevPage()" ${page===0?"disabled":""}>Prev</button><span>Page ${page+1} of ${Math.max(1,pages)}</span><button onclick="nextPage()" ${page>=pages-1?"disabled":""}>Next</button>`;
   }
@@ -409,6 +428,17 @@ const txLast30 = TRANSACTIONS.filter(t => {
 // ── Chat Panel ──────────────────────────────────────────────────────────────
 const SUPABASE_FN = "https://acouuzccqkcpyrckrgwg.supabase.co/functions/v1";
 let chatConversation = [];
+
+// Load account names for transaction identification
+window._accountMap = {};
+fetch(`${SUPABASE_FN}/get-accounts`, { method: "POST" })
+  .then(r => r.json())
+  .then(d => {
+    (d.accounts || []).forEach(a => {
+      const label = (a.official_name || a.name || "Account") + (a.mask ? " ···· " + a.mask : "");
+      window._accountMap[a.account_id] = label;
+    });
+  }).catch(() => {});
 
 function toggleChat() {
   document.getElementById("chatPanel").classList.toggle("open");

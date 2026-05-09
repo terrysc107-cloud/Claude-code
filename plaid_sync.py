@@ -363,6 +363,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
           <th data-col="name">Description <span class="sort-arrow"></span></th>
           <th data-col="amount">Amount <span class="sort-arrow"></span></th>
           <th data-col="category_primary">Category <span class="sort-arrow"></span></th>
+          <th data-col="account_id">Account <span class="sort-arrow"></span></th>
           <th data-col="payment_channel">Channel <span class="sort-arrow"></span></th>
           <th data-col="pending">Status <span class="sort-arrow"></span></th>
         </tr>
@@ -565,8 +566,8 @@ buildCatChart(30);
   function render() {
     sortData(); const total = filtered.length; const start = page * PAGE_SIZE; const slice = filtered.slice(start, start + PAGE_SIZE);
     const body = document.getElementById("txBody");
-    if (!slice.length) { body.innerHTML = `<tr><td colspan="7" class="empty">No transactions found.</td></tr>`; }
-    else { body.innerHTML = slice.map(t => { const amtClass = t.amount < 0 ? "amount-pos" : "amount-neg"; const amtDisplay = t.amount < 0 ? `+${fmtCurrency(-t.amount)}` : fmtCurrency(t.amount); const status = t.pending ? `<span class="badge badge-purple">Pending</span>` : `<span class="badge badge-green">Posted</span>`; return `<tr><td>${esc(t.date)}</td><td>${esc(t.merchant_name) || "--"}</td><td>${esc(t.name)}</td><td class="${amtClass}">${amtDisplay}</td><td>${esc(titleCase(t.category_primary))}</td><td>${esc(t.payment_channel) || "--"}</td><td>${status}</td></tr>`; }).join(""); }
+    if (!slice.length) { body.innerHTML = `<tr><td colspan="8" class="empty">No transactions found.</td></tr>`; }
+    else { body.innerHTML = slice.map(t => { const amtClass = t.amount < 0 ? "amount-pos" : "amount-neg"; const amtDisplay = t.amount < 0 ? `+${fmtCurrency(-t.amount)}` : fmtCurrency(t.amount); const status = t.pending ? `<span class="badge badge-purple">Pending</span>` : `<span class="badge badge-green">Posted</span>`; const acct = window._accountMap && window._accountMap[t.account_id] ? window._accountMap[t.account_id] : (t.account_id ? t.account_id.slice(-4) : "--"); return `<tr><td>${esc(t.date)}</td><td>${esc(t.merchant_name) || "--"}</td><td>${esc(t.name)}</td><td class="${amtClass}">${amtDisplay}</td><td>${esc(titleCase(t.category_primary))}</td><td style="font-size:12px;color:var(--muted)">${esc(acct)}</td><td>${esc(t.payment_channel) || "--"}</td><td>${status}</td></tr>`; }).join(""); }
     const pages = Math.ceil(total / PAGE_SIZE);
     document.getElementById("pagination").innerHTML = `<span>${total.toLocaleString()} transactions</span><button onclick="prevPage()" ${page===0?"disabled":""}>Prev</button><span>Page ${page+1} of ${Math.max(1,pages)}</span><button onclick="nextPage()" ${page>=pages-1?"disabled":""}>Next</button>`;
   }
@@ -581,6 +582,17 @@ buildCatChart(30);
 // ── Chat Panel ──────────────────────────────────────────────────────────────
 const SUPABASE_FN = "__SUPABASE_FN__";
 let chatConversation = [];
+
+// Load account names for transaction identification
+window._accountMap = {};
+fetch(`${SUPABASE_FN}/get-accounts`, { method: "POST" })
+  .then(r => r.json())
+  .then(d => {
+    (d.accounts || []).forEach(a => {
+      const label = (a.official_name || a.name || "Account") + (a.mask ? " ···· " + a.mask : "");
+      window._accountMap[a.account_id] = label;
+    });
+  }).catch(() => {});
 
 function toggleChat() {
   document.getElementById("chatPanel").classList.toggle("open");
