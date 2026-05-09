@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import MonthlyPL from '@/components/tabs/MonthlyPL';
 import SpendCategories from '@/components/tabs/SpendCategories';
@@ -28,7 +28,13 @@ function dateRangeLabel(selectedMonth: string): string {
 }
 
 export function TransactionIntelligence() {
-  const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthKey());
+  // Defer date-derived initial value to a client-only effect so SSR and the
+  // first client render produce identical output (avoids hydration mismatches).
+  const [selectedMonth, setSelectedMonth] = useState<string>('');
+
+  useEffect(() => {
+    setSelectedMonth(currentMonthKey());
+  }, []);
 
   return (
     <div className="terminal-card">
@@ -36,7 +42,7 @@ export function TransactionIntelligence() {
       <div className="panel-header">
         <span className="panel-title">Transaction Intelligence</span>
         <span className="font-mono text-xs text-text-secondary">
-          {dateRangeLabel(selectedMonth)}
+          {selectedMonth ? dateRangeLabel(selectedMonth) : ''}
         </span>
       </div>
 
