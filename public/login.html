@@ -16,32 +16,65 @@
   .field { margin-bottom: 18px; }
   input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; color: var(--text); font-size: 15px; outline: none; transition: border-color .2s; }
   input:focus { border-color: var(--accent); }
-  button { width: 100%; background: var(--accent); color: #fff; border: none; border-radius: 10px; padding: 14px; font-size: 16px; font-weight: 600; cursor: pointer; transition: opacity .2s; margin-top: 8px; }
-  button:hover { opacity: .9; }
-  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.primary { width: 100%; background: var(--accent); color: #fff; border: none; border-radius: 10px; padding: 14px; font-size: 16px; font-weight: 600; cursor: pointer; transition: opacity .2s; margin-top: 8px; }
+  button.primary:hover { opacity: .9; }
+  button.primary:disabled { opacity: .5; cursor: not-allowed; }
+  .links { display: flex; justify-content: space-between; margin-top: 18px; }
+  .link-btn { background: none; border: none; color: var(--muted); font-size: 13px; cursor: pointer; padding: 0; width: auto; transition: color .15s; }
+  .link-btn:hover { color: var(--accent); }
   .status { margin-top: 16px; font-size: 13px; text-align: center; min-height: 18px; }
   .status.err { color: #ff6584; }
   .status.ok { color: var(--green); }
   .spinner { display: inline-block; width: 15px; height: 15px; border: 2px solid var(--muted); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; margin-right: 6px; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .view { display: none; }
+  .view.active { display: block; }
 </style>
 </head>
 <body>
 <div class="card">
   <div class="logo">💳</div>
   <h1>Finance Dashboard</h1>
-  <p class="sub">Sign in to view your transactions &amp; cards</p>
-  <form id="form" onsubmit="signIn(event)">
-    <div class="field">
-      <label for="email">Email</label>
-      <input id="email" type="email" autocomplete="email" required placeholder="you@example.com">
+
+  <!-- Sign In -->
+  <div class="view active" id="viewSignIn">
+    <p class="sub">Sign in to view your transactions &amp; cards</p>
+    <form onsubmit="signIn(event)">
+      <div class="field"><label>Email</label><input id="siEmail" type="email" autocomplete="email" required placeholder="you@example.com"></div>
+      <div class="field"><label>Password</label><input id="siPass" type="password" autocomplete="current-password" required placeholder="••••••••"></div>
+      <button class="primary" id="siBtn" type="submit">Sign In</button>
+    </form>
+    <div class="links">
+      <button class="link-btn" onclick="show('viewSignUp')">Create account</button>
+      <button class="link-btn" onclick="show('viewForgot')">Forgot password?</button>
     </div>
-    <div class="field">
-      <label for="password">Password</label>
-      <input id="password" type="password" autocomplete="current-password" required placeholder="••••••••">
+  </div>
+
+  <!-- Sign Up -->
+  <div class="view" id="viewSignUp">
+    <p class="sub">Create your account</p>
+    <form onsubmit="signUp(event)">
+      <div class="field"><label>Email</label><input id="suEmail" type="email" autocomplete="email" required placeholder="you@example.com"></div>
+      <div class="field"><label>Password</label><input id="suPass" type="password" autocomplete="new-password" required placeholder="Min 6 characters"></div>
+      <button class="primary" id="suBtn" type="submit">Create Account</button>
+    </form>
+    <div class="links">
+      <button class="link-btn" onclick="show('viewSignIn')">← Back to sign in</button>
     </div>
-    <button id="btn" type="submit">Sign In</button>
-  </form>
+  </div>
+
+  <!-- Forgot Password -->
+  <div class="view" id="viewForgot">
+    <p class="sub">We'll email you a reset link</p>
+    <form onsubmit="forgotPassword(event)">
+      <div class="field"><label>Email</label><input id="fpEmail" type="email" autocomplete="email" required placeholder="you@example.com"></div>
+      <button class="primary" id="fpBtn" type="submit">Send Reset Link</button>
+    </form>
+    <div class="links">
+      <button class="link-btn" onclick="show('viewSignIn')">← Back to sign in</button>
+    </div>
+  </div>
+
   <div class="status" id="status"></div>
 </div>
 
@@ -50,32 +83,76 @@
 const SUPABASE_URL = "https://acouuzccqkcpyrckrgwg.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFjb3V1emNjcWtjcHlyY2tyZ3dnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3ODYwMjksImV4cCI6MjA4OTM2MjAyOX0.Nr96gJN4--F83QhQ-E8dP9wbMhsSAXvcThoq0SVUtLM";
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
-
-const btn = document.getElementById("btn");
 const status = document.getElementById("status");
 
-// Already logged in → skip to dashboard
 sb.auth.getSession().then(({ data: { session } }) => {
   if (session) window.location.href = "/dashboard.html";
 });
 
+function show(viewId) {
+  document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+  document.getElementById(viewId).classList.add("active");
+  status.className = "status";
+  status.textContent = "";
+}
+
+function setLoading(btnId, loading) {
+  document.getElementById(btnId).disabled = loading;
+  if (loading) status.innerHTML = '<span class="spinner"></span>';
+}
+
 async function signIn(e) {
   e.preventDefault();
-  btn.disabled = true;
-  status.className = "status";
-  status.innerHTML = '<span class="spinner"></span>';
-  const email = document.getElementById("email").value.trim();
-  const password = document.getElementById("password").value;
-  const { error } = await sb.auth.signInWithPassword({ email, password });
+  setLoading("siBtn", true);
+  const { error } = await sb.auth.signInWithPassword({
+    email: document.getElementById("siEmail").value.trim(),
+    password: document.getElementById("siPass").value,
+  });
   if (error) {
     status.className = "status err";
     status.textContent = error.message;
-    btn.disabled = false;
+    setLoading("siBtn", false);
   } else {
     status.className = "status ok";
     status.textContent = "✓ Signed in — redirecting...";
     window.location.href = "/dashboard.html";
   }
+}
+
+async function signUp(e) {
+  e.preventDefault();
+  setLoading("suBtn", true);
+  const { error } = await sb.auth.signUp({
+    email: document.getElementById("suEmail").value.trim(),
+    password: document.getElementById("suPass").value,
+  });
+  if (error) {
+    status.className = "status err";
+    status.textContent = error.message;
+    setLoading("suBtn", false);
+  } else {
+    status.className = "status ok";
+    status.textContent = "✓ Account created! Check your email to confirm, then sign in.";
+    setLoading("suBtn", false);
+    setTimeout(() => show("viewSignIn"), 3000);
+  }
+}
+
+async function forgotPassword(e) {
+  e.preventDefault();
+  setLoading("fpBtn", true);
+  const { error } = await sb.auth.resetPasswordForEmail(
+    document.getElementById("fpEmail").value.trim(),
+    { redirectTo: window.location.origin + "/update-password.html" }
+  );
+  if (error) {
+    status.className = "status err";
+    status.textContent = error.message;
+  } else {
+    status.className = "status ok";
+    status.textContent = "✓ Reset link sent — check your email.";
+  }
+  setLoading("fpBtn", false);
 }
 </script>
 </body>
