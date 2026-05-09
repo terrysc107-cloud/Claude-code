@@ -7,6 +7,8 @@ export function formatCurrency(
 ): string {
   const { compact = false, decimals = 0 } = options;
 
+  if (!isFinite(value) || isNaN(value)) return "—";
+
   if (compact) {
     if (Math.abs(value) >= 1_000_000) {
       return `$${(value / 1_000_000).toFixed(1)}M`;
@@ -31,6 +33,7 @@ export function formatPercent(
   value: number,
   options: { decimals?: number; showSign?: boolean } = {}
 ): string {
+  if (!isFinite(value) || isNaN(value)) return "—";
   const { decimals = 1, showSign = false } = options;
   const sign = showSign && value > 0 ? "+" : "";
   return `${sign}${value.toFixed(decimals)}%`;
