@@ -194,9 +194,9 @@ export function NetWorthCenter() {
           supabase
             .schema("north_star")
             .from("context_store")
-            .select("key, value, client_id")
+            .select("context_key, context_value, client_id")
             .eq("client_id", CLIENT_ID)
-            .in("key", contextKeys),
+            .in("context_key", contextKeys),
         ]);
 
       if (snapshotsResult.error) throw snapshotsResult.error;
@@ -204,7 +204,7 @@ export function NetWorthCenter() {
 
       const contextMap: Record<string, string> = {};
       for (const entry of contextResult.data ?? []) {
-        contextMap[entry.key] = entry.value;
+        contextMap[entry.context_key] = entry.context_value;
       }
 
       const investments = INVESTMENT_ACCOUNTS.map((account) => {

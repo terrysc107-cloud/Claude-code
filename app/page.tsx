@@ -25,7 +25,7 @@ export default function DashboardPage() {
               North Star OS — Wealth Intelligence Dashboard
             </p>
           </div>
-          <div className="text-xs font-mono text-text-secondary">
+          <div className="text-xs font-mono text-text-secondary" suppressHydrationWarning>
             {new Date().toLocaleDateString("en-US", {
               weekday: "short",
               month: "short",

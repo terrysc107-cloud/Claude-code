@@ -50,8 +50,8 @@ export interface IncomeStream {
 }
 
 export interface ContextStoreEntry {
-  key: string;
-  value: string;
+  context_key: string;
+  context_value: string;
   client_id: string;
 }
 
