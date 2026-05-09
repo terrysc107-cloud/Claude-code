@@ -19,3 +19,9 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude Flow runtime state
+.claude-flow/data/
+.claude-flow/sessions/
+.claude-flow/logs/
+.claude-flow/neural/
