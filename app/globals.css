@@ -1,0 +1,143 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: #0a0a0a;
+    --surface: #111111;
+    --surface-2: #1a1a1a;
+    --border: #2a2a2a;
+    --accent-green: #00ff88;
+    --accent-amber: #ffaa00;
+    --accent-red: #ff4444;
+    --text-primary: #e8e8e8;
+    --text-secondary: #888888;
+    --radius: 4px;
+  }
+
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--text-primary);
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--surface);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 2px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #444;
+  }
+}
+
+@layer components {
+  /* Terminal card */
+  .terminal-card {
+    @apply bg-surface border border-border rounded-sm;
+  }
+
+  /* Panel header */
+  .panel-header {
+    @apply px-4 py-3 border-b border-border flex items-center justify-between;
+  }
+
+  .panel-title {
+    @apply text-xs font-mono font-semibold tracking-widest uppercase text-accent-green;
+  }
+
+  /* Data number display */
+  .data-value {
+    @apply font-mono tabular-nums text-text-primary;
+  }
+
+  .data-label {
+    @apply text-xs font-mono uppercase tracking-wider text-text-secondary;
+  }
+
+  /* Status indicators */
+  .status-green {
+    @apply text-accent-green;
+  }
+
+  .status-amber {
+    @apply text-accent-amber;
+  }
+
+  .status-red {
+    @apply text-accent-red;
+  }
+
+  /* Progress bar */
+  .progress-track {
+    @apply h-1 bg-surface-2 rounded-full overflow-hidden;
+  }
+
+  .progress-fill {
+    @apply h-full rounded-full transition-all duration-500;
+  }
+
+  /* Blink animation for alerts */
+  .alert-blink {
+    animation: blink 1.5s ease-in-out infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* Loading skeleton */
+  .skeleton {
+    @apply bg-surface-2 animate-pulse rounded-sm;
+  }
+
+  /* Monospace number */
+  .mono-num {
+    @apply font-mono tabular-nums;
+  }
+}
+
+@layer utilities {
+  .text-accent-green {
+    color: var(--accent-green);
+  }
+
+  .text-accent-amber {
+    color: var(--accent-amber);
+  }
+
+  .text-accent-red {
+    color: var(--accent-red);
+  }
+
+  .bg-surface {
+    background-color: var(--surface);
+  }
+
+  .bg-surface-2 {
+    background-color: var(--surface-2);
+  }
+
+  .border-border {
+    border-color: var(--border);
+  }
+}
