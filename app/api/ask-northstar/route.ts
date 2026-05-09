@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
         supabase
           .schema("north_star")
           .from("context_store")
-          .select("key, value")
+          .select("context_key, context_value")
           .eq("client_id", CLIENT_ID),
         supabase
           .schema("north_star")
@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
     // Build context dump
     const contextEntries = (contextResult.data as ContextStoreEntry[] | null) ?? [];
     const contextDump = contextEntries
-      .map((e) => `${e.key}: ${e.value}`)
+      .map((e) => `${e.context_key}: ${e.context_value}`)
       .join("\n");
 
     const latestNetWorth = netWorthResult.data?.[0] as NetWorthSnapshot | null;
