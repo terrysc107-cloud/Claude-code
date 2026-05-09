@@ -32,3 +32,4 @@ Thumbs.db
 .claude-flow/sessions/
 .claude-flow/logs/
 .claude-flow/neural/
+tsconfig.tsbuildinfo
