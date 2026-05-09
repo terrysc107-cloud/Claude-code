@@ -1,5 +1,12 @@
 # Secrets and credentials
 .env
+.env.local
+.env.*.local
+
+# Dependencies
+node_modules/
+.next/
+out/
 
 # Plaid runtime state (contains access_token — never commit)
 plaid_state.json
