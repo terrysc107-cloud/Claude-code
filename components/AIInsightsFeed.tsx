@@ -367,17 +367,24 @@ export default function AIInsightsFeed() {
   const [activeFilter, setActiveFilter] = useState<InsightFilter>('all');
 
   // ── Chat state ──
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'greeting',
-      role: 'assistant',
-      content:
-        'North Star Command Center online. How can I assist with your financial intelligence today?',
-      timestamp: new Date(),
-    },
-  ]);
+  // Initialize empty to avoid hydration mismatch from `new Date()` in SSR;
+  // the greeting (with its timestamp) is added after mount in an effect below.
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+
+  // Seed the greeting message on the client only.
+  useEffect(() => {
+    setMessages([
+      {
+        id: 'greeting',
+        role: 'assistant',
+        content:
+          'North Star Command Center online. How can I assist with your financial intelligence today?',
+        timestamp: new Date(),
+      },
+    ]);
+  }, []);
 
   // ── Refs ──
   const chatBottomRef = useRef<HTMLDivElement>(null);
