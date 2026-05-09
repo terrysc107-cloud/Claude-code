@@ -1,15 +1,22 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
+// Singleton — prevents multiple GoTrueClient instances across components
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let browserClient: SupabaseClient<any, "public", any> | null = null;
+
 /**
  * Browser-safe Supabase client using the anon key.
- * Safe for use in client components.
+ * Returns a singleton to avoid multiple GoTrueClient instances.
  */
 export function createBrowserClient() {
-  return createClient(supabaseUrl, supabaseAnonKey);
+  if (!browserClient) {
+    browserClient = createClient(supabaseUrl, supabaseAnonKey);
+  }
+  return browserClient;
 }
 
 /**
