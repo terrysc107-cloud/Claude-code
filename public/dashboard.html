@@ -46,11 +46,27 @@ async function signOut() {
   .card .label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 8px; }
   .card .value { font-size: 26px; font-weight: 700; color: var(--text); }
   .card .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
-  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
-  @media (max-width: 900px) { .charts { grid-template-columns: 1fr; } }
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .charts-bottom { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  @media (max-width: 900px) { .charts, .charts-bottom { grid-template-columns: 1fr; } }
   .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
   .chart-card h2 { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 16px; }
-  .chart-wrap { position: relative; height: 280px; }
+  .chart-wrap { position: relative; height: 300px; }
+  .chart-wrap-tall { position: relative; height: 340px; }
+  /* Heatmap */
+  .heatmap-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 24px; }
+  .heatmap-card h2 { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 14px; }
+  .heatmap-scroll { overflow-x: auto; }
+  .heatmap-grid { display: flex; gap: 3px; align-items: flex-start; }
+  .heatmap-col { display: flex; flex-direction: column; gap: 3px; }
+  .heatmap-cell { width: 14px; height: 14px; border-radius: 2px; background: var(--border); cursor: default; transition: opacity .1s; }
+  .heatmap-cell:hover { opacity: .8; }
+  .heatmap-labels { display: flex; gap: 3px; margin-bottom: 4px; }
+  .heatmap-month-label { font-size: 10px; color: var(--muted); }
+  .heatmap-legend { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 11px; color: var(--muted); }
+  .heatmap-legend-cells { display: flex; gap: 3px; }
+  .heatmap-dow { display: flex; flex-direction: column; gap: 3px; margin-right: 6px; padding-top: 20px; }
+  .heatmap-dow span { font-size: 9px; color: var(--muted); height: 14px; line-height: 14px; }
   .section { margin-bottom: 24px; }
   .section h2 { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 12px; }
   .controls { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -151,13 +167,28 @@ async function signOut() {
   <div class="cards" id="summaryCards"></div>
   <div class="charts">
     <div class="chart-card">
-      <h2>Spending by Category (30d)</h2>
-      <div class="chart-wrap"><canvas id="catChart"></canvas></div>
+      <h2>Spending by Category <span id="catChartLabel" style="color:var(--accent);margin-left:4px"></span></h2>
+      <div class="chart-wrap-tall"><canvas id="donutChart"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <h2>Income vs Expenses</h2>
+      <div class="chart-wrap-tall"><canvas id="incomeChart"></canvas></div>
+    </div>
+  </div>
+  <div class="charts-bottom">
+    <div class="chart-card">
+      <h2>Top Merchants (30d)</h2>
+      <div class="chart-wrap"><canvas id="merchantChart"></canvas></div>
     </div>
     <div class="chart-card">
       <h2>Monthly Spending Trend</h2>
       <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
     </div>
+  </div>
+  <div class="heatmap-card">
+    <h2>Daily Spending Heatmap</h2>
+    <div class="heatmap-scroll" id="heatmapWrap"></div>
+    <div class="heatmap-legend">Less <div class="heatmap-legend-cells" id="heatmapLegend"></div> More</div>
   </div>
   <div class="section">
     <h2>Recurring / Subscriptions</h2>
@@ -325,34 +356,149 @@ const txLast30 = TRANSACTIONS.filter(t => {
   document.getElementById("summaryCards").innerHTML = cards.map(c => `<div class="card"><div class="label">${c.label}</div><div class="value">${c.value}</div><div class="sub">${c.sub}</div></div>`).join("");
 })();
 
-(function buildCatChart() {
+// ── Donut: Spending by category ────────────────────────────────────────────
+(function buildDonutChart() {
   const map = {};
   txLast30.forEach(t => { map[t.category_primary || "OTHER"] = (map[t.category_primary || "OTHER"] || 0) + t.amount; });
-  const sorted = Object.entries(map).sort((a,b) => b[1]-a[1]).slice(0, 10);
-  const colors = ["#DA7756","#5ABF8A","#7BB3D4","#F0C070","#C05746","#8BAF7A","#D4956A","#B07060","#E0A868","#8A9EBF"];
-  new Chart(document.getElementById("catChart"), {
-    type: "bar",
-    data: { labels: sorted.map(([k]) => k.replace(/_/g," ")), datasets: [{ data: sorted.map(([,v]) => v), backgroundColor: colors, borderRadius: 6 }] },
+  const sorted = Object.entries(map).sort((a,b) => b[1]-a[1]).slice(0, 8);
+  const colors = ["#DA7756","#5ABF8A","#7BB3D4","#F0C070","#C05746","#8BAF7A","#D4956A","#8A9EBF"];
+  const total = sorted.reduce((s,[,v]) => s+v, 0);
+  document.getElementById("catChartLabel").textContent = fmtCurrency(total);
+  new Chart(document.getElementById("donutChart"), {
+    type: "doughnut",
+    data: { labels: sorted.map(([k]) => k.replace(/_/g," ")), datasets: [{ data: sorted.map(([,v]) => v), backgroundColor: colors, borderWidth: 0, hoverOffset: 8 }] },
     options: {
-      indexAxis: "y", responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtCurrency(ctx.raw) } } },
-      scales: { x: { ticks: { color: "#9E8E84", callback: v => "$"+Math.round(v) }, grid: { color: "#3D3530" } }, y: { ticks: { color: "#F5EDE6" }, grid: { display: false } } }
+      responsive: true, maintainAspectRatio: false, cutout: "62%",
+      plugins: {
+        legend: { position: "right", labels: { color: "#9E8E84", font: { size: 11 }, boxWidth: 12, padding: 12 } },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${fmtCurrency(ctx.raw)} (${Math.round(ctx.raw/total*100)}%)` } }
+      }
     }
   });
 })();
 
+// ── Income vs Expenses grouped bar ─────────────────────────────────────────
+(function buildIncomeChart() {
+  const income = {}, expenses = {};
+  TRANSACTIONS.filter(t => !t.pending).forEach(t => {
+    const mo = t.date.slice(0,7);
+    if (t.amount < 0) income[mo] = (income[mo]||0) + Math.abs(t.amount);
+    else expenses[mo] = (expenses[mo]||0) + t.amount;
+  });
+  const months = [...new Set([...Object.keys(income), ...Object.keys(expenses)])].sort().slice(-12);
+  new Chart(document.getElementById("incomeChart"), {
+    type: "bar",
+    data: {
+      labels: months.map(m => { const [y,mo] = m.split("-"); return new Date(+y,+mo-1).toLocaleString("en-US",{month:"short",year:"2-digit"}); }),
+      datasets: [
+        { label: "Income", data: months.map(m => income[m]||0), backgroundColor: "#5ABF8A", borderRadius: 4 },
+        { label: "Expenses", data: months.map(m => expenses[m]||0), backgroundColor: "#DA7756", borderRadius: 4 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: "#9E8E84", font: { size: 11 }, boxWidth: 12 } }, tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${fmtCurrency(ctx.raw)}` } } },
+      scales: {
+        x: { ticks: { color: "#9E8E84" }, grid: { color: "#3D3530" } },
+        y: { ticks: { color: "#9E8E84", callback: v => "$"+Math.round(v) }, grid: { color: "#3D3530" } }
+      }
+    }
+  });
+})();
+
+// ── Top Merchants bar ───────────────────────────────────────────────────────
+(function buildMerchantChart() {
+  const map = {};
+  txLast30.forEach(t => { const key = (t.merchant_name || t.name || "Other").trim(); map[key] = (map[key]||0) + t.amount; });
+  const sorted = Object.entries(map).sort((a,b) => b[1]-a[1]).slice(0, 10);
+  new Chart(document.getElementById("merchantChart"), {
+    type: "bar",
+    data: { labels: sorted.map(([k]) => k.length > 22 ? k.slice(0,20)+"…" : k), datasets: [{ data: sorted.map(([,v]) => v), backgroundColor: "#7BB3D4", borderRadius: 4 }] },
+    options: {
+      indexAxis: "y", responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => " " + fmtCurrency(ctx.raw) } } },
+      scales: { x: { ticks: { color: "#9E8E84", callback: v => "$"+Math.round(v) }, grid: { color: "#3D3530" } }, y: { ticks: { color: "#F5EDE6", font: { size: 11 } }, grid: { display: false } } }
+    }
+  });
+})();
+
+// ── Monthly Trend line ──────────────────────────────────────────────────────
 (function buildTrendChart() {
   const map = {};
   TRANSACTIONS.filter(t => !t.pending && t.amount > 0).forEach(t => { const mo = t.date.slice(0,7); map[mo] = (map[mo]||0) + t.amount; });
   const months = Object.keys(map).sort();
   new Chart(document.getElementById("trendChart"), {
     type: "line",
-    data: { labels: months, datasets: [{ data: months.map(m => map[m]), borderColor: "#DA7756", backgroundColor: "rgba(218,119,86,.12)", fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: "#DA7756" }] },
+    data: { labels: months.map(m => { const [y,mo] = m.split("-"); return new Date(+y,+mo-1).toLocaleString("en-US",{month:"short",year:"2-digit"}); }), datasets: [{ data: months.map(m => map[m]), borderColor: "#DA7756", backgroundColor: "rgba(218,119,86,.12)", fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: "#DA7756" }] },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtCurrency(ctx.raw) } } },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => " " + fmtCurrency(ctx.raw) } } },
       scales: { x: { ticks: { color: "#9E8E84" }, grid: { color: "#3D3530" } }, y: { ticks: { color: "#9E8E84", callback: v => "$"+Math.round(v) }, grid: { color: "#3D3530" } } }
     }
+  });
+})();
+
+// ── Daily Spending Heatmap ──────────────────────────────────────────────────
+(function buildHeatmap() {
+  const dayMap = {};
+  TRANSACTIONS.filter(t => !t.pending && t.amount > 0).forEach(t => { dayMap[t.date] = (dayMap[t.date]||0) + t.amount; });
+  const amounts = Object.values(dayMap);
+  const maxAmt = amounts.length ? Math.max(...amounts) : 1;
+  const accentRGB = [218, 119, 86];
+
+  // Build 52-week grid starting from 52 weeks ago
+  const today = new Date(); today.setHours(0,0,0,0);
+  const start = new Date(today); start.setDate(start.getDate() - 364);
+  // Align to Sunday
+  start.setDate(start.getDate() - start.getDay());
+
+  const cols = []; let col = null; let prevMonth = -1;
+  const monthLabels = [];
+  for (let d = new Date(start); d <= today; d.setDate(d.getDate()+1)) {
+    if (d.getDay() === 0) { col = document.createElement("div"); col.className = "heatmap-col"; cols.push({ col, month: d.getMonth(), label: d.toLocaleString("en-US",{month:"short"}) }); }
+    const key = d.toISOString().slice(0,10);
+    const amt = dayMap[key] || 0;
+    const cell = document.createElement("div");
+    cell.className = "heatmap-cell";
+    if (amt > 0) {
+      const intensity = Math.min(1, amt / maxAmt);
+      const alpha = 0.15 + intensity * 0.85;
+      cell.style.background = `rgba(${accentRGB.join(",")},${alpha.toFixed(2)})`;
+    }
+    cell.title = key + (amt ? ": " + fmtCurrency(amt) : ": no spending");
+    col.appendChild(cell);
+  }
+
+  const wrap = document.getElementById("heatmapWrap");
+  const grid = document.createElement("div"); grid.className = "heatmap-grid";
+
+  // Day-of-week labels
+  const dow = document.createElement("div"); dow.className = "heatmap-dow";
+  ["","Mon","","Wed","","Fri",""].forEach(l => { const s = document.createElement("span"); s.textContent = l; dow.appendChild(s); });
+  grid.appendChild(dow);
+
+  // Month label row + columns
+  const colWrap = document.createElement("div"); colWrap.style.display = "flex"; colWrap.style.flexDirection = "column"; colWrap.style.gap = "0";
+  const labelRow = document.createElement("div"); labelRow.className = "heatmap-labels"; labelRow.style.display = "flex"; labelRow.style.gap = "3px"; labelRow.style.marginBottom = "4px";
+  let lastLabelMonth = -1;
+  cols.forEach(({ col, month, label }) => {
+    const lbl = document.createElement("span");
+    lbl.style.width = "14px"; lbl.style.fontSize = "9px"; lbl.style.color = "var(--muted)"; lbl.style.textAlign = "left";
+    lbl.textContent = (month !== lastLabelMonth) ? label : "";
+    if (month !== lastLabelMonth) lastLabelMonth = month;
+    labelRow.appendChild(lbl);
+    grid.appendChild(col);
+  });
+
+  wrap.appendChild(labelRow);
+  wrap.appendChild(grid);
+
+  // Legend
+  const legend = document.getElementById("heatmapLegend");
+  [0.1, 0.3, 0.55, 0.75, 1].forEach(v => {
+    const c = document.createElement("div"); c.className = "heatmap-cell";
+    c.style.background = v === 0.1 ? "var(--border)" : `rgba(${accentRGB.join(",")},${(0.15+v*0.85).toFixed(2)})`;
+    legend.appendChild(c);
   });
 })();
 
