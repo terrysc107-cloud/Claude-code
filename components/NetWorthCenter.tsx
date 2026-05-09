@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   LineChart,
   Line,
@@ -8,277 +8,782 @@ import {
   Bar,
   XAxis,
   YAxis,
+  CartesianGrid,
   Tooltip,
-  ResponsiveContainer,
   Legend,
+  ReferenceLine,
+  ResponsiveContainer,
 } from "recharts";
-import { createBrowserClient } from "@/lib/supabase";
-import { formatCurrency, formatDate } from "@/lib/formatters";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Progress } from "@/components/ui/progress";
-import type { NetWorthSnapshot, NetWorthChartPoint } from "@/types";
+import { createBrowserClient, CLIENT_ID } from "@/lib/supabase";
+import { formatCurrency, formatPercent, formatDate } from "@/lib/formatters";
+import type {
+  NetWorthSnapshot,
+  Property,
+  NetWorthChartPoint,
+} from "@/types";
 
-const TARGETS = [
-  { label: "Y1 Target", value: 2_500_000 },
-  { label: "Y3 Target", value: 5_000_000 },
-  { label: "Y5 Target", value: 10_000_000 },
-];
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-const CLIENT_ID = "a1000000-0000-0000-0000-000000000001";
-
-interface AssetRow {
-  name: string;
-  value: number;
-  type: "real_estate" | "investment" | "cash" | "other";
+interface InvestmentAccount {
+  label: string;
+  contextKey: string;
+  value: number | null;
 }
 
-export function NetWorthCenter() {
-  const [snapshots, setSnapshots] = useState<NetWorthSnapshot[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+interface NetWorthCenterState {
+  snapshots: NetWorthSnapshot[];
+  properties: Property[];
+  investments: InvestmentAccount[];
+  error: string | null;
+}
 
-  useEffect(() => {
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const INVESTMENT_ACCOUNTS: Omit<InvestmentAccount, "value">[] = [
+  { label: "M1 Finance", contextKey: "m1_balance" },
+  { label: "ThinkorSwim", contextKey: "thinkorswim_balance" },
+  { label: "Roth IRA", contextKey: "roth_ira_balance" },
+  { label: "BTC", contextKey: "btc_balance" },
+  { label: "401(k)", contextKey: "401k_balance" },
+  { label: "Options", contextKey: "options_balance" },
+];
+
+const TARGET_LINES = [
+  { value: 2_500_000, label: "Y1 $2.5M" },
+  { value: 5_000_000, label: "Y3 $5M" },
+  { value: 10_000_000, label: "Y5 $10M" },
+];
+
+// ─── Skeleton helpers ─────────────────────────────────────────────────────────
+
+function SkeletonBlock({
+  w = "100%",
+  h = 16,
+}: {
+  w?: string | number;
+  h?: number;
+}) {
+  return (
+    <div
+      className="skeleton rounded-sm"
+      style={{ width: w, height: h }}
+      aria-hidden="true"
+    />
+  );
+}
+
+function TableRowSkeleton({ cols = 5 }: { cols?: number }) {
+  return (
+    <tr>
+      {Array.from({ length: cols }).map((_, i) => (
+        <td key={i} className="px-3 py-2">
+          <SkeletonBlock h={12} />
+        </td>
+      ))}
+    </tr>
+  );
+}
+
+// ─── Custom Tooltips ──────────────────────────────────────────────────────────
+
+function ChartTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: { name: string; value: number; color: string }[];
+  label?: string;
+}) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div
+      className="terminal-card p-3"
+      style={{ minWidth: 180, fontSize: 11, fontFamily: "monospace" }}
+    >
+      <p style={{ color: "var(--text-secondary)", marginBottom: 6 }}>{label}</p>
+      {payload.map((entry) => (
+        <div
+          key={entry.name}
+          className="flex justify-between gap-4"
+          style={{ color: entry.color }}
+        >
+          <span className="uppercase tracking-wider" style={{ opacity: 0.8 }}>
+            {entry.name}
+          </span>
+          <span className="font-semibold tabular-nums">
+            {formatCurrency(entry.value, { compact: true })}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function BarTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: { name: string; value: number; fill: string }[];
+  label?: string;
+}) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div
+      className="terminal-card p-3"
+      style={{ minWidth: 180, fontSize: 11, fontFamily: "monospace" }}
+    >
+      <p style={{ color: "var(--text-secondary)", marginBottom: 6 }}>{label}</p>
+      {payload.map((entry) => (
+        <div
+          key={entry.name}
+          className="flex justify-between gap-4"
+          style={{ color: entry.fill }}
+        >
+          <span className="uppercase tracking-wider" style={{ opacity: 0.8 }}>
+            {entry.name}
+          </span>
+          <span className="font-semibold tabular-nums">
+            {formatCurrency(entry.value, { compact: true })}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+export function NetWorthCenter() {
+  const [state, setState] = useState<NetWorthCenterState>({
+    snapshots: [],
+    properties: [],
+    investments: INVESTMENT_ACCOUNTS.map((a) => ({ ...a, value: null })),
+    error: null,
+  });
+  const [loading, setLoading] = useState(true);
+
+  const fetchData = useCallback(async () => {
     const supabase = createBrowserClient();
 
-    async function load() {
-      try {
-        const { data, error: err } = await supabase
-          .schema("north_star")
-          .from("net_worth_snapshots")
-          .select("*")
-          .eq("client_id", CLIENT_ID)
-          .order("snapshot_date", { ascending: true })
-          .limit(24);
+    try {
+      const contextKeys = INVESTMENT_ACCOUNTS.map((a) => a.contextKey);
 
-        if (err) throw err;
-        setSnapshots((data as NetWorthSnapshot[]) ?? []);
-      } catch (e) {
-        setError("Failed to load net worth data");
-        console.error(e);
-      } finally {
-        setLoading(false);
+      const [snapshotsResult, propertiesResult, contextResult] =
+        await Promise.all([
+          supabase
+            .schema("north_star")
+            .from("net_worth_snapshots")
+            .select(
+              "id, snapshot_date, gross_assets, total_debt, net_worth, client_id"
+            )
+            .eq("client_id", CLIENT_ID)
+            .order("snapshot_date", { ascending: true }),
+
+          supabase
+            .schema("north_star")
+            .from("properties")
+            .select(
+              "id, address, value, debt, equity, monthly_rent, vacancy_status, client_id"
+            )
+            .eq("client_id", CLIENT_ID)
+            .order("value", { ascending: false }),
+
+          supabase
+            .schema("north_star")
+            .from("context_store")
+            .select("key, value, client_id")
+            .eq("client_id", CLIENT_ID)
+            .in("key", contextKeys),
+        ]);
+
+      if (snapshotsResult.error) throw snapshotsResult.error;
+      if (propertiesResult.error) throw propertiesResult.error;
+
+      const contextMap: Record<string, string> = {};
+      for (const entry of contextResult.data ?? []) {
+        contextMap[entry.key] = entry.value;
       }
-    }
 
-    load();
+      const investments = INVESTMENT_ACCOUNTS.map((account) => {
+        const raw = contextMap[account.contextKey];
+        if (raw == null) return { ...account, value: null };
+        const parsed = parseFloat(raw);
+        return { ...account, value: isNaN(parsed) ? null : parsed };
+      });
+
+      setState({
+        snapshots: snapshotsResult.data ?? [],
+        properties: propertiesResult.data ?? [],
+        investments,
+        error: null,
+      });
+    } catch (err) {
+      console.error("[NetWorthCenter] fetch error:", err);
+      setState((prev) => ({
+        ...prev,
+        error: "Data unavailable — check connection or RLS policies.",
+      }));
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const latest = snapshots[snapshots.length - 1];
-  const y1Target = 2_500_000;
-  const y1Progress = latest ? (latest.net_worth / y1Target) * 100 : 0;
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  const { snapshots, properties, investments, error } = state;
+
+  // ── Derived chart data ────────────────────────────────────────────────────
 
   const chartData: NetWorthChartPoint[] = snapshots.map((s) => ({
-    date: formatDate(s.snapshot_date, "month-year"),
+    date: formatDate(s.snapshot_date, "short"),
     netWorth: s.net_worth,
     grossAssets: s.gross_assets,
     totalDebt: s.total_debt,
   }));
 
-  if (loading) {
-    return (
-      <Card className="col-span-2">
-        <CardHeader>
-          <CardTitle>Net Worth</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-4">
-            <Skeleton className="h-48" />
-            <Skeleton className="h-48" />
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
+  // Stacked bar — derive allocation from latest known balances applied to last 3 snapshots
+  const totalPropertyEquity = properties.reduce(
+    (sum, p) => sum + (p.equity ?? 0),
+    0
+  );
+  const totalInvestments = investments.reduce(
+    (sum, a) => sum + (a.value ?? 0),
+    0
+  );
 
-  if (error || !latest) {
+  const last3Snapshots = snapshots.slice(-3);
+  const barData = last3Snapshots.map((s) => {
+    const reEquity = Math.min(totalPropertyEquity, s.net_worth);
+    const invPortion = Math.min(totalInvestments, Math.max(s.net_worth - reEquity, 0));
+    const cash = Math.max(s.net_worth - reEquity - invPortion, 0);
+    return {
+      date: formatDate(s.snapshot_date, "month-year"),
+      "RE Equity": reEquity,
+      Investments: invPortion,
+      Cash: cash,
+    };
+  });
+
+  // ── Asset table derived values ────────────────────────────────────────────
+
+  const displayedProperties = properties.slice(0, 6);
+  const totalPropertyValue = properties.reduce((sum, p) => sum + (p.value ?? 0), 0);
+  const totalPropertyDebt = properties.reduce((sum, p) => sum + (p.debt ?? 0), 0);
+  const totalEquity = properties.reduce((sum, p) => sum + (p.equity ?? 0), 0);
+
+  const latestSnapshot = snapshots[snapshots.length - 1];
+  const grossAssets = latestSnapshot?.gross_assets ?? totalPropertyValue + totalInvestments;
+  const totalDebt = latestSnapshot?.total_debt ?? totalPropertyDebt;
+  const netWorth = latestSnapshot?.net_worth ?? grossAssets - totalDebt;
+
+  const yAxisFormatter = (v: number) => formatCurrency(v, { compact: true });
+
+  const chartBg = { backgroundColor: "#111" };
+
+  // ── Error state ───────────────────────────────────────────────────────────
+
+  if (error) {
     return (
-      <Card className="col-span-2">
-        <CardHeader>
-          <CardTitle>Net Worth</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-text-secondary font-mono text-sm">
-            {error ?? "No data available"}
-          </p>
-        </CardContent>
-      </Card>
+      <div className="terminal-card p-6 text-center">
+        <p className="font-mono text-sm" style={{ color: "var(--accent-red)" }}>
+          {error}
+        </p>
+      </div>
     );
   }
 
   return (
-    <Card className="col-span-2">
-      <CardHeader>
-        <CardTitle>Net Worth Center</CardTitle>
-        <div className="text-xs font-mono text-text-secondary">
-          as of {formatDate(latest.snapshot_date)}
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Left: Chart + Gauge */}
-          <div className="space-y-4">
-            {/* Hero number */}
-            <div>
-              <div className="text-3xl font-mono font-bold tabular-nums text-accent-green">
-                {formatCurrency(latest.net_worth)}
-              </div>
-              <div className="text-xs font-mono text-text-secondary mt-1">
-                Gross Assets: {formatCurrency(latest.gross_assets)} &nbsp;|&nbsp;
-                Total Debt: {formatCurrency(latest.total_debt)}
-              </div>
-            </div>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 w-full">
+      {/* ══════════════════════════════════════════════════════════════════════
+          LEFT COLUMN — CHARTS
+      ══════════════════════════════════════════════════════════════════════ */}
+      <div className="flex flex-col gap-4">
 
-            {/* Y1 Progress */}
-            <div className="space-y-1">
-              <div className="flex justify-between text-xs font-mono text-text-secondary">
-                <span>Y1 Target: {formatCurrency(y1Target, { compact: true })}</span>
-                <span className="text-accent-green">{y1Progress.toFixed(1)}%</span>
-              </div>
-              <Progress value={y1Progress} max={100} color={y1Progress >= 100 ? "green" : y1Progress >= 70 ? "amber" : "red"} />
-            </div>
-
-            {/* Target milestones */}
-            <div className="grid grid-cols-3 gap-2">
-              {TARGETS.map((t) => {
-                const pct = latest ? (latest.net_worth / t.value) * 100 : 0;
-                return (
-                  <div key={t.label} className="bg-surface-2 rounded-sm p-2 border border-border">
-                    <div className="text-xs font-mono text-text-secondary">{t.label}</div>
-                    <div className="text-xs font-mono font-semibold text-accent-amber">
-                      {formatCurrency(t.value, { compact: true })}
-                    </div>
-                    <div className="text-xs font-mono text-text-secondary mt-1">
-                      {pct.toFixed(0)}% there
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Line chart */}
-            {chartData.length > 1 && (
-              <div className="h-40">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData}>
-                    <XAxis
-                      dataKey="date"
-                      tick={{ fontSize: 9, fontFamily: "JetBrains Mono", fill: "#888" }}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 9, fontFamily: "JetBrains Mono", fill: "#888" }}
-                      axisLine={false}
-                      tickLine={false}
-                      tickFormatter={(v) => `$${(v / 1000).toFixed(0)}K`}
-                      width={50}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        background: "#111",
-                        border: "1px solid #2a2a2a",
-                        fontFamily: "JetBrains Mono",
-                        fontSize: 11,
-                        color: "#e8e8e8",
-                      }}
-                      formatter={(v: number) => [formatCurrency(v), ""]}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="netWorth"
-                      name="Net Worth"
-                      stroke="#00ff88"
-                      strokeWidth={2}
-                      dot={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+        {/* Net Worth over time */}
+        <div className="terminal-card">
+          <div className="panel-header">
+            <span className="panel-title">NET WORTH CENTER</span>
+            {!loading && latestSnapshot && (
+              <span
+                className="font-mono text-xs"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                {formatDate(latestSnapshot.snapshot_date, "medium")}
+              </span>
             )}
           </div>
 
-          {/* Right: Stacked bar + asset table */}
-          <div className="space-y-4">
-            {/* Stacked bar: assets vs debt */}
-            {chartData.length > 1 && (
-              <div className="h-40">
-                <div className="text-xs font-mono text-text-secondary mb-1">Assets vs Debt Trend</div>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData.slice(-6)}>
-                    <XAxis
-                      dataKey="date"
-                      tick={{ fontSize: 9, fontFamily: "JetBrains Mono", fill: "#888" }}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 9, fontFamily: "JetBrains Mono", fill: "#888" }}
-                      axisLine={false}
-                      tickLine={false}
-                      tickFormatter={(v) => `$${(v / 1000).toFixed(0)}K`}
-                      width={50}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        background: "#111",
-                        border: "1px solid #2a2a2a",
-                        fontFamily: "JetBrains Mono",
-                        fontSize: 11,
-                        color: "#e8e8e8",
-                      }}
-                      formatter={(v: number) => [formatCurrency(v), ""]}
-                    />
-                    <Bar dataKey="grossAssets" name="Gross Assets" fill="#00ff88" opacity={0.7} />
-                    <Bar dataKey="totalDebt" name="Total Debt" fill="#ff4444" opacity={0.7} />
-                    <Legend
-                      wrapperStyle={{ fontSize: 10, fontFamily: "JetBrains Mono", color: "#888" }}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
+          <div className="p-4" style={chartBg}>
+            {loading ? (
+              <div className="skeleton" style={{ height: 260 }} />
+            ) : chartData.length === 0 ? (
+              <div
+                className="flex items-center justify-center font-mono text-xs"
+                style={{ height: 260, color: "var(--text-secondary)" }}
+              >
+                No snapshot data available
               </div>
-            )}
+            ) : (
+              <ResponsiveContainer width="100%" height={260}>
+                <LineChart
+                  data={chartData}
+                  margin={{ top: 8, right: 16, bottom: 0, left: 8 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="#2a2a2a"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="date"
+                    tick={{
+                      fontSize: 10,
+                      fontFamily: "monospace",
+                      fill: "#888",
+                    }}
+                    axisLine={{ stroke: "#2a2a2a" }}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    tickFormatter={yAxisFormatter}
+                    tick={{
+                      fontSize: 10,
+                      fontFamily: "monospace",
+                      fill: "#888",
+                    }}
+                    axisLine={false}
+                    tickLine={false}
+                    width={60}
+                  />
+                  <Tooltip content={<ChartTooltip />} />
+                  <Legend
+                    wrapperStyle={{
+                      fontSize: 10,
+                      fontFamily: "monospace",
+                      paddingTop: 8,
+                    }}
+                  />
 
-            {/* Asset breakdown */}
-            <div className="space-y-2">
-              <div className="text-xs font-mono text-text-secondary uppercase tracking-widest">
-                Position Summary
+                  {TARGET_LINES.map((t) => (
+                    <ReferenceLine
+                      key={t.value}
+                      y={t.value}
+                      stroke="#3a3a3a"
+                      strokeDasharray="4 4"
+                      label={{
+                        value: t.label,
+                        fill: "#555",
+                        fontSize: 9,
+                        fontFamily: "monospace",
+                        position: "insideTopRight",
+                      }}
+                    />
+                  ))}
+
+                  <Line
+                    type="monotone"
+                    dataKey="netWorth"
+                    name="Net Worth"
+                    stroke="#00ff88"
+                    strokeWidth={2}
+                    dot={false}
+                    activeDot={{ r: 4, fill: "#00ff88" }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="grossAssets"
+                    name="Gross Assets"
+                    stroke="#ffaa00"
+                    strokeWidth={1.5}
+                    dot={false}
+                    strokeDasharray="5 2"
+                    activeDot={{ r: 3, fill: "#ffaa00" }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="totalDebt"
+                    name="Total Debt"
+                    stroke="#ff4444"
+                    strokeWidth={1.5}
+                    dot={false}
+                    strokeDasharray="5 2"
+                    activeDot={{ r: 3, fill: "#ff4444" }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
+
+        {/* Equity composition — stacked bar */}
+        <div className="terminal-card">
+          <div className="panel-header">
+            <span className="panel-title">EQUITY COMPOSITION</span>
+            <span
+              className="font-mono text-xs"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              LAST 3 SNAPSHOTS
+            </span>
+          </div>
+
+          <div className="p-4" style={chartBg}>
+            {loading ? (
+              <div className="skeleton" style={{ height: 160 }} />
+            ) : barData.length === 0 ? (
+              <div
+                className="flex items-center justify-center font-mono text-xs"
+                style={{ height: 160, color: "var(--text-secondary)" }}
+              >
+                No data
               </div>
-              <div className="space-y-1">
-                {[
-                  {
-                    label: "Gross Assets",
-                    value: latest.gross_assets,
-                    color: "text-accent-green",
-                  },
-                  {
-                    label: "Total Debt",
-                    value: latest.total_debt,
-                    color: "text-accent-red",
-                  },
-                  {
-                    label: "Net Worth",
-                    value: latest.net_worth,
-                    color: "text-accent-amber",
-                  },
-                ].map((row) => (
-                  <div
-                    key={row.label}
-                    className="flex justify-between items-center py-1 border-b border-border"
+            ) : (
+              <ResponsiveContainer width="100%" height={160}>
+                <BarChart
+                  data={barData}
+                  margin={{ top: 4, right: 16, bottom: 0, left: 8 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="#2a2a2a"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="date"
+                    tick={{
+                      fontSize: 10,
+                      fontFamily: "monospace",
+                      fill: "#888",
+                    }}
+                    axisLine={{ stroke: "#2a2a2a" }}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    tickFormatter={yAxisFormatter}
+                    tick={{
+                      fontSize: 10,
+                      fontFamily: "monospace",
+                      fill: "#888",
+                    }}
+                    axisLine={false}
+                    tickLine={false}
+                    width={60}
+                  />
+                  <Tooltip content={<BarTooltip />} />
+                  <Legend
+                    wrapperStyle={{
+                      fontSize: 10,
+                      fontFamily: "monospace",
+                      paddingTop: 4,
+                    }}
+                  />
+                  <Bar dataKey="RE Equity" stackId="nw" fill="#ffaa00" />
+                  <Bar dataKey="Investments" stackId="nw" fill="#00ff88" />
+                  <Bar
+                    dataKey="Cash"
+                    stackId="nw"
+                    fill="#4488cc"
+                    radius={[2, 2, 0, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          RIGHT COLUMN — TABLES
+      ══════════════════════════════════════════════════════════════════════ */}
+      <div className="flex flex-col gap-4">
+
+        {/* Real estate properties */}
+        <div className="terminal-card">
+          <div className="panel-header">
+            <span className="panel-title">ASSET BREAKDOWN</span>
+            {!loading && (
+              <span
+                className="font-mono text-xs"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                {properties.length} PROPERTIES
+              </span>
+            )}
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full" style={{ fontSize: 11 }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                  {["ADDRESS", "VALUE", "DEBT", "EQUITY", "EQ%"].map((h) => (
+                    <th
+                      key={h}
+                      className="px-3 py-2 text-left font-mono uppercase tracking-wider"
+                      style={{
+                        color: "var(--text-secondary)",
+                        fontWeight: 500,
+                        fontSize: 10,
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  Array.from({ length: 6 }).map((_, i) => (
+                    <TableRowSkeleton key={i} cols={5} />
+                  ))
+                ) : displayedProperties.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-3 py-4 text-center font-mono text-xs"
+                      style={{ color: "var(--text-secondary)" }}
+                    >
+                      No properties found
+                    </td>
+                  </tr>
+                ) : (
+                  displayedProperties.map((p) => {
+                    const equityPct =
+                      p.value > 0 ? (p.equity / p.value) * 100 : 0;
+                    const shortAddr =
+                      p.address.split(",")[0]?.trim() ?? p.address;
+                    return (
+                      <tr
+                        key={p.id}
+                        style={{ borderBottom: "1px solid var(--border)" }}
+                        className="hover:bg-surface-2 transition-colors"
+                      >
+                        <td
+                          className="px-3 py-2 font-mono"
+                          style={{
+                            color: "var(--text-primary)",
+                            maxWidth: 130,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                          title={p.address}
+                        >
+                          {shortAddr}
+                        </td>
+                        <td
+                          className="px-3 py-2 mono-num tabular-nums"
+                          style={{ color: "var(--text-primary)" }}
+                        >
+                          {formatCurrency(p.value, { compact: true })}
+                        </td>
+                        <td
+                          className="px-3 py-2 mono-num tabular-nums"
+                          style={{ color: "var(--accent-red)" }}
+                        >
+                          {formatCurrency(p.debt, { compact: true })}
+                        </td>
+                        <td
+                          className="px-3 py-2 mono-num tabular-nums"
+                          style={{ color: "var(--accent-green)" }}
+                        >
+                          {formatCurrency(p.equity, { compact: true })}
+                        </td>
+                        <td
+                          className="px-3 py-2 mono-num tabular-nums"
+                          style={{
+                            color:
+                              equityPct >= 40
+                                ? "var(--accent-green)"
+                                : equityPct >= 20
+                                ? "var(--accent-amber)"
+                                : "var(--text-secondary)",
+                          }}
+                        >
+                          {formatPercent(equityPct)}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+
+                {/* Property totals */}
+                {!loading && displayedProperties.length > 0 && (
+                  <tr
+                    style={{
+                      borderTop: "2px solid var(--border)",
+                      backgroundColor: "rgba(0,255,136,0.04)",
+                    }}
                   >
-                    <span className="text-xs font-mono text-text-secondary">
-                      {row.label}
-                    </span>
-                    <span className={`text-sm font-mono font-semibold tabular-nums ${row.color}`}>
-                      {formatCurrency(row.value)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
+                    <td
+                      className="px-3 py-2 font-mono font-semibold uppercase tracking-wider"
+                      style={{ color: "var(--text-secondary)", fontSize: 10 }}
+                    >
+                      TOTAL RE
+                    </td>
+                    <td
+                      className="px-3 py-2 mono-num font-semibold"
+                      style={{ color: "var(--text-primary)" }}
+                    >
+                      {formatCurrency(totalPropertyValue, { compact: true })}
+                    </td>
+                    <td
+                      className="px-3 py-2 mono-num font-semibold"
+                      style={{ color: "var(--accent-red)" }}
+                    >
+                      {formatCurrency(totalPropertyDebt, { compact: true })}
+                    </td>
+                    <td
+                      className="px-3 py-2 mono-num font-semibold"
+                      style={{ color: "var(--accent-green)" }}
+                    >
+                      {formatCurrency(totalEquity, { compact: true })}
+                    </td>
+                    <td
+                      className="px-3 py-2 mono-num font-semibold"
+                      style={{ color: "var(--accent-green)" }}
+                    >
+                      {totalPropertyValue > 0
+                        ? formatPercent(
+                            (totalEquity / totalPropertyValue) * 100
+                          )
+                        : "—"}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
-      </CardContent>
-    </Card>
+
+        {/* Investment accounts */}
+        <div className="terminal-card">
+          <div className="panel-header">
+            <span className="panel-title">INVESTMENT ACCOUNTS</span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full" style={{ fontSize: 11 }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                  {["ACCOUNT", "BALANCE"].map((h) => (
+                    <th
+                      key={h}
+                      className="px-3 py-2 text-left font-mono uppercase tracking-wider"
+                      style={{
+                        color: "var(--text-secondary)",
+                        fontWeight: 500,
+                        fontSize: 10,
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {loading
+                  ? Array.from({ length: 6 }).map((_, i) => (
+                      <TableRowSkeleton key={i} cols={2} />
+                    ))
+                  : investments.map((account) => (
+                      <tr
+                        key={account.contextKey}
+                        style={{ borderBottom: "1px solid var(--border)" }}
+                        className="hover:bg-surface-2 transition-colors"
+                      >
+                        <td
+                          className="px-3 py-2 font-mono"
+                          style={{ color: "var(--text-secondary)" }}
+                        >
+                          {account.label}
+                        </td>
+                        <td
+                          className="px-3 py-2 mono-num tabular-nums font-semibold"
+                          style={{
+                            color:
+                              account.value !== null
+                                ? "var(--accent-green)"
+                                : "var(--text-secondary)",
+                          }}
+                        >
+                          {account.value !== null
+                            ? formatCurrency(account.value)
+                            : "—"}
+                        </td>
+                      </tr>
+                    ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Grand totals */}
+        <div className="terminal-card">
+          <table className="w-full" style={{ fontSize: 12 }}>
+            <tbody>
+              {loading ? (
+                Array.from({ length: 3 }).map((_, i) => (
+                  <TableRowSkeleton key={i} cols={2} />
+                ))
+              ) : (
+                <>
+                  <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                    <td
+                      className="px-4 py-3 font-mono uppercase tracking-wider"
+                      style={{ color: "var(--text-secondary)", fontSize: 10 }}
+                    >
+                      TOTAL GROSS ASSETS
+                    </td>
+                    <td
+                      className="px-4 py-3 mono-num font-bold text-right"
+                      style={{ color: "var(--accent-amber)", fontSize: 14 }}
+                    >
+                      {formatCurrency(grossAssets, { compact: true })}
+                    </td>
+                  </tr>
+                  <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                    <td
+                      className="px-4 py-3 font-mono uppercase tracking-wider"
+                      style={{ color: "var(--text-secondary)", fontSize: 10 }}
+                    >
+                      TOTAL DEBT
+                    </td>
+                    <td
+                      className="px-4 py-3 mono-num font-bold text-right"
+                      style={{ color: "var(--accent-red)", fontSize: 14 }}
+                    >
+                      -{formatCurrency(totalDebt, { compact: true })}
+                    </td>
+                  </tr>
+                  <tr
+                    style={{
+                      backgroundColor: "rgba(0,255,136,0.06)",
+                    }}
+                  >
+                    <td
+                      className="px-4 py-3 font-mono font-bold uppercase tracking-widest"
+                      style={{ color: "var(--accent-green)", fontSize: 11 }}
+                    >
+                      NET WORTH
+                    </td>
+                    <td
+                      className="px-4 py-3 mono-num font-bold text-right"
+                      style={{ color: "var(--accent-green)", fontSize: 16 }}
+                    >
+                      {formatCurrency(netWorth, { compact: true })}
+                    </td>
+                  </tr>
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   );
 }

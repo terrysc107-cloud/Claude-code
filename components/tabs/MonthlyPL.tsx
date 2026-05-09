@@ -1,249 +1,316 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import { createBrowserClient } from "@/lib/supabase";
-import {
-  fetchTransactions,
-  buildMonthlyPL,
-  groupByMonth,
-} from "@/lib/transactions";
-import {
-  formatCurrency,
-  formatPercent,
-  getLastNMonths,
-  formatMonthKey,
-} from "@/lib/formatters";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
-import type { MonthlyPLData, Transaction } from "@/types";
+import { useState, useEffect, useCallback } from 'react';
+import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { createBrowserClient } from '@/lib/supabase';
+import { fetchTransactions, buildMonthlyPL } from '@/lib/transactions';
+import { formatCurrency, formatPercent, formatMonthKey } from '@/lib/formatters';
+import type { MonthlyPLData } from '@/types';
 
-export function MonthlyPL() {
-  const [months, setMonths] = useState<string[]>([]);
-  const [selectedMonth, setSelectedMonth] = useState<string>("");
-  const [plData, setPlData] = useState<MonthlyPLData | null>(null);
+interface MonthlyPLProps {
+  selectedMonth: string;
+  onMonthChange: (month: string) => void;
+}
+
+function monthDateRange(monthKey: string): { start: string; end: string } {
+  const [year, month] = monthKey.split('-').map(Number);
+  const lastDay = new Date(year, month, 0).getDate();
+  return {
+    start: `${monthKey}-01`,
+    end: `${monthKey}-${String(lastDay).padStart(2, '0')}`,
+  };
+}
+
+function shiftMonth(monthKey: string, delta: number): string {
+  const [year, month] = monthKey.split('-').map(Number);
+  const d = new Date(year, month - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function currentMonthKey(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function MomIndicator({ change }: { change: number | null }) {
+  if (change === null) return <Minus size={10} className="text-text-secondary inline" />;
+  if (change > 0)
+    return (
+      <span className="inline-flex items-center gap-0.5 status-red">
+        <TrendingUp size={10} />
+        {formatPercent(Math.abs(change))}
+      </span>
+    );
+  return (
+    <span className="inline-flex items-center gap-0.5 status-green">
+      <TrendingDown size={10} />
+      {formatPercent(Math.abs(change))}
+    </span>
+  );
+}
+
+export default function MonthlyPL({ selectedMonth, onMonthChange }: MonthlyPLProps) {
+  const [data, setData] = useState<MonthlyPLData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const last6 = getLastNMonths(6);
-    setMonths(last6);
-    setSelectedMonth(last6[0]);
+  const load = useCallback(async (month: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const supabase = createBrowserClient();
+      const priorMonth = shiftMonth(month, -1);
+      const { start, end } = monthDateRange(month);
+      const { start: priorStart, end: priorEnd } = monthDateRange(priorMonth);
+
+      const [current, prior] = await Promise.all([
+        fetchTransactions(supabase, start, end),
+        fetchTransactions(supabase, priorStart, priorEnd),
+      ]);
+
+      setData(buildMonthlyPL(current, prior));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load data');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (!selectedMonth) return;
+    if (selectedMonth) load(selectedMonth);
+  }, [selectedMonth, load]);
 
-    const supabase = createBrowserClient();
-    setLoading(true);
-
-    async function load() {
-      try {
-        const [year, month] = selectedMonth.split("-");
-        const startDate = `${year}-${month}-01`;
-        const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
-        const endDate = `${year}-${month}-${lastDay}`;
-
-        // Prior month
-        const priorDate = new Date(parseInt(year), parseInt(month) - 2, 1);
-        const priorYear = priorDate.getFullYear();
-        const priorMonth = String(priorDate.getMonth() + 1).padStart(2, "0");
-        const priorLastDay = new Date(priorYear, priorDate.getMonth() + 1, 0).getDate();
-
-        const [current, prior] = await Promise.all([
-          fetchTransactions(supabase, startDate, endDate),
-          fetchTransactions(
-            supabase,
-            `${priorYear}-${priorMonth}-01`,
-            `${priorYear}-${priorMonth}-${priorLastDay}`
-          ),
-        ]);
-
-        setPlData(buildMonthlyPL(current, prior));
-      } catch (e) {
-        setError("Failed to load transaction data");
-        console.error(e);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    load();
-  }, [selectedMonth]);
-
-  if (error) {
-    return (
-      <div className="p-4 text-sm font-mono text-text-secondary">
-        Data unavailable: {error}
-      </div>
-    );
-  }
+  const atCeiling = selectedMonth >= currentMonthKey();
 
   return (
     <div className="space-y-4">
-      {/* Month selector */}
-      <div className="flex gap-2 flex-wrap">
-        {months.map((m) => (
-          <button
-            key={m}
-            onClick={() => setSelectedMonth(m)}
-            className={`text-xs font-mono px-3 py-1 rounded-sm border transition-all ${
-              selectedMonth === m
-                ? "border-accent-green text-accent-green bg-accent-green/10"
-                : "border-border text-text-secondary hover:border-accent-green/50"
-            }`}
-          >
-            {formatMonthKey(m)}
-          </button>
-        ))}
+      {/* Month navigator */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => onMonthChange(shiftMonth(selectedMonth, -1))}
+          className="p-1 rounded-sm hover:bg-surface-2 text-text-secondary hover:text-text-primary transition-colors"
+          aria-label="Previous month"
+        >
+          <ChevronLeft size={16} />
+        </button>
+        <span className="font-mono text-sm font-semibold tracking-widest text-text-primary uppercase min-w-[80px] text-center">
+          {selectedMonth ? formatMonthKey(selectedMonth) : '—'}
+        </span>
+        <button
+          onClick={() => !atCeiling && onMonthChange(shiftMonth(selectedMonth, 1))}
+          disabled={atCeiling}
+          className="p-1 rounded-sm hover:bg-surface-2 text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          aria-label="Next month"
+        >
+          <ChevronRight size={16} />
+        </button>
       </div>
 
-      {loading ? (
-        <div className="space-y-2">
-          <Skeleton className="h-16 w-full" />
-          <Skeleton className="h-32 w-full" />
-          <Skeleton className="h-32 w-full" />
-        </div>
-      ) : plData ? (
-        <div className="space-y-4">
-          {/* Summary row */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              {
-                label: "Income",
-                value: formatCurrency(plData.income),
-                color: "text-accent-green",
-              },
-              {
-                label: "Spending",
-                value: formatCurrency(plData.spending),
-                color: "text-accent-red",
-              },
-              {
-                label: "Net",
-                value: formatCurrency(plData.net),
-                color: plData.net >= 0 ? "text-accent-green" : "text-accent-red",
-              },
-              {
-                label: "Savings Rate",
-                value: formatPercent(plData.savingsRate),
-                color: plData.savingsRate >= 20 ? "text-accent-green" : "text-accent-amber",
-              },
-            ].map((stat) => (
-              <div
-                key={stat.label}
-                className="bg-surface-2 border border-border rounded-sm p-3"
-              >
-                <div className="text-xs font-mono text-text-secondary uppercase tracking-wider">
-                  {stat.label}
-                </div>
-                <div className={`text-lg font-mono font-bold tabular-nums ${stat.color}`}>
-                  {stat.value}
-                </div>
-              </div>
+      {/* Loading skeletons */}
+      {loading && (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="skeleton h-20 rounded-sm" />
             ))}
           </div>
-
-          {/* Income breakdown */}
-          <div>
-            <div className="text-xs font-mono text-text-secondary uppercase tracking-widest mb-2">
-              Income by Category
-            </div>
-            <div className="space-y-1">
-              {plData.incomeByCategory.map((cat) => (
-                <div
-                  key={cat.category}
-                  className="flex justify-between items-center py-1 border-b border-border"
-                >
-                  <span className="text-xs font-mono text-text-primary">
-                    {cat.category}
-                  </span>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-mono text-text-secondary">
-                      {formatPercent(cat.percentage)}
-                    </span>
-                    <span className="text-sm font-mono font-semibold text-accent-green tabular-nums">
-                      {formatCurrency(cat.total)}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="skeleton h-64 rounded-sm" />
+            <div className="skeleton h-64 rounded-sm" />
           </div>
-
-          {/* Spending breakdown */}
-          <div>
-            <div className="text-xs font-mono text-text-secondary uppercase tracking-widest mb-2">
-              Spending by Category
-            </div>
-            <div className="space-y-1">
-              {plData.spendingByCategory.map((cat) => (
-                <div
-                  key={cat.category}
-                  className="flex justify-between items-center py-1 border-b border-border"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-mono text-text-primary">
-                      {cat.category}
-                    </span>
-                    {cat.percentage > 15 && (
-                      <Badge variant="amber">OVERSIZED</Badge>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-mono text-text-secondary">
-                      {formatPercent(cat.percentage)}
-                    </span>
-                    {cat.momChange !== null && (
-                      <span
-                        className={`text-xs font-mono ${
-                          cat.momChange > 10
-                            ? "text-accent-red"
-                            : cat.momChange < -10
-                            ? "text-accent-green"
-                            : "text-text-secondary"
-                        }`}
-                      >
-                        {cat.momChange > 0 ? "+" : ""}
-                        {cat.momChange.toFixed(0)}% MoM
-                      </span>
-                    )}
-                    <span className="text-sm font-mono font-semibold text-text-primary tabular-nums">
-                      {formatCurrency(cat.total)}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Top merchants */}
-          <div>
-            <div className="text-xs font-mono text-text-secondary uppercase tracking-widest mb-2">
-              Top Merchants
-            </div>
-            <div className="space-y-1">
-              {plData.topMerchants.map((m, i) => (
-                <div
-                  key={m.merchant}
-                  className="flex justify-between items-center py-1 border-b border-border"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-mono text-text-secondary w-4">
-                      {i + 1}
-                    </span>
-                    <span className="text-xs font-mono text-text-primary">
-                      {m.merchant}
-                    </span>
-                  </div>
-                  <span className="text-sm font-mono font-semibold text-text-primary tabular-nums">
-                    {formatCurrency(m.total)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
+          <div className="skeleton h-48 rounded-sm" />
         </div>
-      ) : null}
+      )}
+
+      {/* Error state */}
+      {!loading && error && (
+        <div className="terminal-card p-4">
+          <p className="font-mono text-xs status-red">ERROR: {error}</p>
+        </div>
+      )}
+
+      {/* Data */}
+      {!loading && !error && data && (
+        <>
+          {/* Stat cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="terminal-card p-4">
+              <p className="data-label mb-1">Income</p>
+              <p className="data-value text-xl font-bold status-green tabular-nums">
+                {formatCurrency(data.income)}
+              </p>
+            </div>
+            <div className="terminal-card p-4">
+              <p className="data-label mb-1">Spending</p>
+              <p className="data-value text-xl font-bold status-red tabular-nums">
+                {formatCurrency(data.spending)}
+              </p>
+            </div>
+            <div className="terminal-card p-4">
+              <p className="data-label mb-1">Net</p>
+              <p className={`data-value text-xl font-bold tabular-nums ${data.net >= 0 ? 'status-green' : 'status-red'}`}>
+                {formatCurrency(data.net)}
+              </p>
+            </div>
+            <div className="terminal-card p-4">
+              <p className="data-label mb-1">Savings Rate</p>
+              <p
+                className={`data-value text-xl font-bold tabular-nums ${
+                  data.savingsRate >= 20
+                    ? 'status-green'
+                    : data.savingsRate >= 10
+                    ? 'status-amber'
+                    : 'status-red'
+                }`}
+              >
+                {formatPercent(data.savingsRate)}
+              </p>
+            </div>
+          </div>
+
+          {/* Category tables */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* Income by Category */}
+            <div className="terminal-card">
+              <div className="panel-header">
+                <span className="panel-title">Income by Category</span>
+                <span className="font-mono text-xs text-text-secondary tabular-nums">
+                  {formatCurrency(data.income)} total
+                </span>
+              </div>
+              <table className="w-full text-xs font-mono">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="text-left px-4 py-2 text-text-secondary font-normal tracking-wider uppercase">Category</th>
+                    <th className="text-right px-4 py-2 text-text-secondary font-normal tracking-wider uppercase">Amount</th>
+                    <th className="text-right px-4 py-2 text-text-secondary font-normal tracking-wider uppercase">% Income</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.incomeByCategory.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="px-4 py-4 text-center text-text-secondary">
+                        No income recorded
+                      </td>
+                    </tr>
+                  ) : (
+                    data.incomeByCategory.map((cat) => (
+                      <tr
+                        key={cat.category}
+                        className="border-b border-border/30 hover:bg-surface-2/60 transition-colors"
+                      >
+                        <td className="px-4 py-2 text-text-primary">{cat.category}</td>
+                        <td className="px-4 py-2 text-right status-green tabular-nums">
+                          {formatCurrency(cat.total)}
+                        </td>
+                        <td className="px-4 py-2 text-right text-text-secondary tabular-nums">
+                          {formatPercent(cat.percentage)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Spending by Category */}
+            <div className="terminal-card">
+              <div className="panel-header">
+                <span className="panel-title">Spending by Category</span>
+                <span className="font-mono text-xs text-text-secondary tabular-nums">
+                  {formatCurrency(data.spending)} total
+                </span>
+              </div>
+              <table className="w-full text-xs font-mono">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="text-left px-4 py-2 text-text-secondary font-normal tracking-wider uppercase">Category</th>
+                    <th className="text-right px-4 py-2 text-text-secondary font-normal tracking-wider uppercase">Amount</th>
+                    <th className="text-right px-4 py-2 text-text-secondary font-normal tracking-wider uppercase">% Spend</th>
+                    <th className="text-right px-4 py-2 text-text-secondary font-normal tracking-wider uppercase">MoM</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.spendingByCategory.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-4 text-center text-text-secondary">
+                        No spending recorded
+                      </td>
+                    </tr>
+                  ) : (
+                    data.spendingByCategory.map((cat) => (
+                      <tr
+                        key={cat.category}
+                        className="border-b border-border/30 hover:bg-surface-2/60 transition-colors"
+                      >
+                        <td className="px-4 py-2 text-text-primary">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span>{cat.category}</span>
+                            {cat.percentage > 15 && (
+                              <span className="text-[9px] font-semibold px-1 py-0.5 rounded-sm border border-accent-amber/50 status-amber tracking-widest whitespace-nowrap">
+                                OVERSIZED
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-2 text-right status-red tabular-nums">
+                          {formatCurrency(cat.total)}
+                        </td>
+                        <td className="px-4 py-2 text-right text-text-secondary tabular-nums">
+                          {formatPercent(cat.percentage)}
+                        </td>
+                        <td className="px-4 py-2 text-right tabular-nums">
+                          <MomIndicator change={cat.momChange} />
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Top 10 Merchants */}
+          <div className="terminal-card">
+            <div className="panel-header">
+              <span className="panel-title">Top 10 Merchants</span>
+            </div>
+            <table className="w-full text-xs font-mono">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="text-left px-4 py-2 text-text-secondary font-normal tracking-wider uppercase w-8">#</th>
+                  <th className="text-left px-4 py-2 text-text-secondary font-normal tracking-wider uppercase">Merchant</th>
+                  <th className="text-right px-4 py-2 text-text-secondary font-normal tracking-wider uppercase">Amount</th>
+                  <th className="text-left px-4 py-2 text-text-secondary font-normal tracking-wider uppercase">Category</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.topMerchants.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-4 text-center text-text-secondary">
+                      No merchant data
+                    </td>
+                  </tr>
+                ) : (
+                  data.topMerchants.map((m, i) => (
+                    <tr
+                      key={m.merchant}
+                      className="border-b border-border/30 hover:bg-surface-2/60 transition-colors"
+                    >
+                      <td className="px-4 py-2 text-text-secondary tabular-nums">{i + 1}</td>
+                      <td className="px-4 py-2 text-text-primary">{m.merchant}</td>
+                      <td className="px-4 py-2 text-right status-red tabular-nums">
+                        {formatCurrency(m.total)}
+                      </td>
+                      <td className="px-4 py-2 text-text-secondary">{m.category ?? '—'}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   );
 }
