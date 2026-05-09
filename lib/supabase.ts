@@ -4,19 +4,19 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-// Singleton — prevents multiple GoTrueClient instances across components
+// Use globalThis so the singleton survives Next.js chunk-splitting in the browser
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let browserClient: SupabaseClient<any, "public", any> | null = null;
+const g = globalThis as typeof globalThis & { __sbClient?: SupabaseClient<any, "public", any> };
 
 /**
  * Browser-safe Supabase client using the anon key.
  * Returns a singleton to avoid multiple GoTrueClient instances.
  */
 export function createBrowserClient() {
-  if (!browserClient) {
-    browserClient = createClient(supabaseUrl, supabaseAnonKey);
+  if (!g.__sbClient) {
+    g.__sbClient = createClient(supabaseUrl, supabaseAnonKey);
   }
-  return browserClient;
+  return g.__sbClient;
 }
 
 /**

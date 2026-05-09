@@ -186,17 +186,17 @@ export function NetWorthCenter() {
             .schema("north_star")
             .from("properties")
             .select(
-              "id, address, value, debt, equity, monthly_rent, vacancy_status, client_id"
+              "id, address, current_value, debt_balance, monthly_rent, vacancy_status, client_id"
             )
             .eq("client_id", CLIENT_ID)
-            .order("value", { ascending: false }),
+            .order("current_value", { ascending: false }),
 
           supabase
             .schema("north_star")
             .from("context_store")
-            .select("context_key, context_value, client_id")
+            .select("key, value, client_id")
             .eq("client_id", CLIENT_ID)
-            .in("context_key", contextKeys),
+            .in("key", contextKeys),
         ]);
 
       if (snapshotsResult.error) throw snapshotsResult.error;
@@ -204,7 +204,7 @@ export function NetWorthCenter() {
 
       const contextMap: Record<string, string> = {};
       for (const entry of contextResult.data ?? []) {
-        contextMap[entry.context_key] = entry.context_value;
+        contextMap[entry.key] = entry.value;
       }
 
       const investments = INVESTMENT_ACCOUNTS.map((account) => {
@@ -248,7 +248,7 @@ export function NetWorthCenter() {
 
   // Stacked bar — derive allocation from latest known balances applied to last 3 snapshots
   const totalPropertyEquity = properties.reduce(
-    (sum, p) => sum + (p.equity ?? 0),
+    (sum, p) => sum + ((p.current_value ?? 0) - (p.debt_balance ?? 0)),
     0
   );
   const totalInvestments = investments.reduce(
@@ -272,9 +272,9 @@ export function NetWorthCenter() {
   // ── Asset table derived values ────────────────────────────────────────────
 
   const displayedProperties = properties.slice(0, 6);
-  const totalPropertyValue = properties.reduce((sum, p) => sum + (p.value ?? 0), 0);
-  const totalPropertyDebt = properties.reduce((sum, p) => sum + (p.debt ?? 0), 0);
-  const totalEquity = properties.reduce((sum, p) => sum + (p.equity ?? 0), 0);
+  const totalPropertyValue = properties.reduce((sum, p) => sum + (p.current_value ?? 0), 0);
+  const totalPropertyDebt = properties.reduce((sum, p) => sum + (p.debt_balance ?? 0), 0);
+  const totalEquity = properties.reduce((sum, p) => sum + ((p.current_value ?? 0) - (p.debt_balance ?? 0)), 0);
 
   const latestSnapshot = snapshots[snapshots.length - 1];
   const grossAssets = latestSnapshot?.gross_assets ?? totalPropertyValue + totalInvestments;
@@ -552,8 +552,9 @@ export function NetWorthCenter() {
                   </tr>
                 ) : (
                   displayedProperties.map((p) => {
+                    const equity = (p.current_value ?? 0) - (p.debt_balance ?? 0);
                     const equityPct =
-                      p.value > 0 ? (p.equity / p.value) * 100 : 0;
+                      p.current_value > 0 ? (equity / p.current_value) * 100 : 0;
                     const shortAddr =
                       p.address.split(",")[0]?.trim() ?? p.address;
                     return (
@@ -579,19 +580,19 @@ export function NetWorthCenter() {
                           className="px-3 py-2 mono-num tabular-nums"
                           style={{ color: "var(--text-primary)" }}
                         >
-                          {formatCurrency(p.value, { compact: true })}
+                          {formatCurrency(p.current_value, { compact: true })}
                         </td>
                         <td
                           className="px-3 py-2 mono-num tabular-nums"
                           style={{ color: "var(--accent-red)" }}
                         >
-                          {formatCurrency(p.debt, { compact: true })}
+                          {formatCurrency(p.debt_balance, { compact: true })}
                         </td>
                         <td
                           className="px-3 py-2 mono-num tabular-nums"
                           style={{ color: "var(--accent-green)" }}
                         >
-                          {formatCurrency(p.equity, { compact: true })}
+                          {formatCurrency(equity, { compact: true })}
                         </td>
                         <td
                           className="px-3 py-2 mono-num tabular-nums"

@@ -17,50 +17,6 @@ import { createBrowserClient, CLIENT_ID } from '@/lib/supabase';
 import { formatCurrency, formatPercent, formatDate, daysUntil } from '@/lib/formatters';
 import type { IncomeStream, Goal } from '@/types';
 
-// ─── Real DB row shape ────────────────────────────────────────────────────────
-
-interface RawIncomeRow {
-  id: string;
-  client_id: string;
-  month_period: string;
-  source: string;
-  amount: number;
-  notes: string | null;
-}
-
-// Projected Y3/Y5 targets per source (annualised)
-const PROJECTIONS: Record<string, { y3: number; y5: number }> = {
-  ATS:         { y3: 450_000, y5: 600_000 },
-  'Real Estate': { y3: 144_900, y5: 200_000 },
-  Clarix:      { y3: 200_000, y5: 500_000 },
-  Portfolio:   { y3: 50_000,  y5: 100_000 },
-  Consulting:  { y3: 50_000,  y5: 100_000 },
-  W2:          { y3: 0,       y5: 0 },
-};
-
-function aggregateStreams(rows: RawIncomeRow[]): IncomeStream[] {
-  const bySource = new Map<string, { total: number; months: Set<string> }>();
-  for (const r of rows) {
-    if (!bySource.has(r.source)) bySource.set(r.source, { total: 0, months: new Set() });
-    const entry = bySource.get(r.source)!;
-    entry.total += r.amount;
-    entry.months.add(r.month_period);
-  }
-  return Array.from(bySource.entries()).map(([source, { total, months }]) => {
-    const monthCount = months.size || 1;
-    const current_annual = Math.round((total / monthCount) * 12);
-    const proj = PROJECTIONS[source] ?? { y3: current_annual * 2, y5: current_annual * 3 };
-    return {
-      id: source,
-      client_id: rows[0]?.client_id ?? '',
-      stream_name: source,
-      current_annual,
-      projected_year3: proj.y3,
-      projected_year5: proj.y5,
-    } as IncomeStream;
-  });
-}
-
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const YEAR_TARGETS: { year: string; label: string; value: number; color: string }[] = [
@@ -334,7 +290,7 @@ export default function BusinessIncome() {
       if (streamsResult.error) throw new Error(streamsResult.error.message);
       if (goalsResult.error) throw new Error(goalsResult.error.message);
 
-      setStreams(aggregateStreams((streamsResult.data as RawIncomeRow[]) ?? []));
+      setStreams((streamsResult.data as IncomeStream[]) ?? []);
       setGoals((goalsResult.data as Goal[]) ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data');
