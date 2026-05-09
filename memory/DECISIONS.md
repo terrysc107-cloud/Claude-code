@@ -19,7 +19,7 @@
 ## Masterbuilder Integration (2026-05-08)
 
 - Imported full masterbuilder template (agents, commands, helpers, skills, docs, phases, templates, workflows)
-- Removed ruflo daemon hooks from settings.json — not installed in this environment
+- Ruflo daemon hooks re-enabled in settings.json (2026-05-09) — hooks are safe no-ops if Ruflo not installed
 - Using Phase 10 (Production Hardening) + Phase 11 (Launch Readiness) for tonight's ship sprint
 
 ## Active Phase: LAUNCH SPRINT (Phase 10 + 11 combined)

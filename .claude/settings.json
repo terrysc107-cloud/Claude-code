@@ -67,6 +67,11 @@
             "type": "command",
             "command": "sh -c 'exec node \"${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/auto-memory-hook.mjs\" import'",
             "timeout": 8000
+          },
+          {
+            "type": "command",
+            "command": "ruflo daemon start 2>/dev/null; ruflo memory init 2>/dev/null; ruflo swarm init 2>/dev/null; echo '[Ruflo] Session ready'",
+            "timeout": 30000
           }
         ]
       }
