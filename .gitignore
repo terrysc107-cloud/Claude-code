@@ -1,5 +1,12 @@
 # Secrets and credentials
 .env
+.env.local
+.env.*.local
+
+# Dependencies
+node_modules/
+.next/
+out/
 
 # Plaid runtime state (contains access_token — never commit)
 plaid_state.json
@@ -19,3 +26,10 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude Flow runtime state
+.claude-flow/data/
+.claude-flow/sessions/
+.claude-flow/logs/
+.claude-flow/neural/
+tsconfig.tsbuildinfo
