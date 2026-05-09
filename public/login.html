@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sign In — Finance Dashboard</title>
+<style>
+  :root { --bg: #1C1714; --surface: #262220; --accent: #DA7756; --text: #F5EDE6; --muted: #9E8E84; --border: #3D3530; --green: #5ABF8A; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 48px; max-width: 400px; width: 90%; }
+  .logo { font-size: 28px; margin-bottom: 6px; text-align: center; }
+  h1 { font-size: 20px; font-weight: 600; text-align: center; margin-bottom: 6px; }
+  .sub { color: var(--muted); font-size: 13px; text-align: center; margin-bottom: 32px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; letter-spacing: .04em; text-transform: uppercase; }
+  .field { margin-bottom: 18px; }
+  input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; color: var(--text); font-size: 15px; outline: none; transition: border-color .2s; }
+  input:focus { border-color: var(--accent); }
+  button { width: 100%; background: var(--accent); color: #fff; border: none; border-radius: 10px; padding: 14px; font-size: 16px; font-weight: 600; cursor: pointer; transition: opacity .2s; margin-top: 8px; }
+  button:hover { opacity: .9; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .status { margin-top: 16px; font-size: 13px; text-align: center; min-height: 18px; }
+  .status.err { color: #ff6584; }
+  .status.ok { color: var(--green); }
+  .spinner { display: inline-block; width: 15px; height: 15px; border: 2px solid var(--muted); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">💳</div>
+  <h1>Finance Dashboard</h1>
+  <p class="sub">Sign in to view your transactions &amp; cards</p>
+  <form id="form" onsubmit="signIn(event)">
+    <div class="field">
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="email" required placeholder="you@example.com">
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required placeholder="••••••••">
+    </div>
+    <button id="btn" type="submit">Sign In</button>
+  </form>
+  <div class="status" id="status"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL = "https://acouuzccqkcpyrckrgwg.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFjb3V1emNjcWtjcHlyY2tyZ3dnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3ODYwMjksImV4cCI6MjA4OTM2MjAyOX0.Nr96gJN4--F83QhQ-E8dP9wbMhsSAXvcThoq0SVUtLM";
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+const btn = document.getElementById("btn");
+const status = document.getElementById("status");
+
+// Already logged in → skip to dashboard
+sb.auth.getSession().then(({ data: { session } }) => {
+  if (session) window.location.href = "/dashboard.html";
+});
+
+async function signIn(e) {
+  e.preventDefault();
+  btn.disabled = true;
+  status.className = "status";
+  status.innerHTML = '<span class="spinner"></span>';
+  const email = document.getElementById("email").value.trim();
+  const password = document.getElementById("password").value;
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) {
+    status.className = "status err";
+    status.textContent = error.message;
+    btn.disabled = false;
+  } else {
+    status.className = "status ok";
+    status.textContent = "✓ Signed in — redirecting...";
+    window.location.href = "/dashboard.html";
+  }
+}
+</script>
+</body>
+</html>

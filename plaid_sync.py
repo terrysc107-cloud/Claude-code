@@ -191,6 +191,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Financial Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root {
     --bg: #1C1714;
@@ -308,10 +309,12 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
 <header>
   <h1>Financial Dashboard</h1>
   <div class="header-actions">
+    <a href="/cards.html" class="btn" style="text-decoration:none">&#x1F4B3; Cards</a>
     <span class="sync-info" id="syncInfo"></span>
     <button class="btn btn-sync" onclick="syncNow()">&#x21BB; Sync</button>
     <button class="btn btn-export" onclick="exportCSV()">&#x2193; Export CSV</button>
     <button class="btn btn-chat" onclick="toggleChat()">&#x1F4AC; Ask AI</button>
+    <button class="btn" style="color:var(--muted)" onclick="signOut()">Sign out</button>
   </div>
 </header>
 <main>
@@ -371,6 +374,22 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
 </main>
 
 <script>
+// Auth guard
+(function() {
+  const SUPABASE_URL = "https://acouuzccqkcpyrckrgwg.supabase.co";
+  const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFjb3V1emNjcWtjcHlyY2tyZ3dnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3ODYwMjksImV4cCI6MjA4OTM2MjAyOX0.Nr96gJN4--F83QhQ-E8dP9wbMhsSAXvcThoq0SVUtLM";
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+  sb.auth.getSession().then(({ data: { session } }) => {
+    if (!session) window.location.href = "/login.html";
+  });
+  window._sb = sb;
+})();
+
+async function signOut() {
+  await window._sb.auth.signOut();
+  window.location.href = "/login.html";
+}
+
 const TRANSACTIONS = __TRANSACTIONS_JSON__;
 const LAST_SYNC = "__LAST_SYNC__";
 const AI_ANALYSIS = `__AI_ANALYSIS__`;
