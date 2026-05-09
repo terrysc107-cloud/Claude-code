@@ -113,7 +113,7 @@ export function CommandBar() {
           supabase
             .schema("north_star")
             .from("properties")
-            .select("id, address, monthly_rent, vacancy_status, value, debt, equity, client_id")
+            .select("id, address, monthly_rent, vacancy_status, current_value, debt_balance, client_id")
             .eq("client_id", CLIENT_ID),
 
           supabase

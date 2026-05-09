@@ -26,9 +26,8 @@ export interface Property {
   address: string;
   monthly_rent: number | null;
   vacancy_status: string;
-  value: number;
-  debt: number;
-  equity: number;
+  current_value: number;
+  debt_balance: number;
 }
 
 export interface AiInsight {

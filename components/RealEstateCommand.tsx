@@ -38,13 +38,17 @@ function estimateMonthlyPayment(debt: number): number {
 
 function estimateNetCF(property: Property): number {
   const rent = property.monthly_rent ?? 0;
-  const payment = estimateMonthlyPayment(property.debt);
+  const payment = estimateMonthlyPayment(property.debt_balance);
   return rent - payment;
 }
 
+function propertyEquity(property: Property): number {
+  return (property.current_value ?? 0) - (property.debt_balance ?? 0);
+}
+
 function equityPct(property: Property): number {
-  if (property.value <= 0) return 0;
-  return (property.equity / property.value) * 100;
+  if ((property.current_value ?? 0) <= 0) return 0;
+  return (propertyEquity(property) / property.current_value) * 100;
 }
 
 function isVacant(status: string): boolean {
@@ -160,9 +164,9 @@ export default function RealEstateCommand() {
   );
 
   const totals = {
-    value: withCF.reduce((s, p) => s + p.value, 0),
-    debt: withCF.reduce((s, p) => s + p.debt, 0),
-    equity: withCF.reduce((s, p) => s + p.equity, 0),
+    value: withCF.reduce((s, p) => s + (p.current_value ?? 0), 0),
+    debt: withCF.reduce((s, p) => s + (p.debt_balance ?? 0), 0),
+    equity: withCF.reduce((s, p) => s + propertyEquity(p), 0),
     rent: withCF.reduce((s, p) => s + (p.monthly_rent ?? 0), 0),
     netCF: withCF.reduce((s, p) => s + p.netCF, 0),
   };
@@ -280,13 +284,13 @@ export default function RealEstateCommand() {
                       {p.address}
                     </td>
                     <td className="px-3 py-2.5 tabular-nums text-right whitespace-nowrap">
-                      {formatCurrency(p.value, { compact: true })}
+                      {formatCurrency(p.current_value, { compact: true })}
                     </td>
                     <td className="px-3 py-2.5 tabular-nums text-right whitespace-nowrap text-[#888]">
-                      {formatCurrency(p.debt, { compact: true })}
+                      {formatCurrency(p.debt_balance, { compact: true })}
                     </td>
                     <td className="px-3 py-2.5 tabular-nums text-right whitespace-nowrap text-accent-green">
-                      {formatCurrency(p.equity, { compact: true })}
+                      {formatCurrency(propertyEquity(p), { compact: true })}
                     </td>
                     <td className="px-3 py-2.5 tabular-nums text-right whitespace-nowrap">
                       {formatPercent(equityPct(p))}
