@@ -1,3 +1,5 @@
+"use client";
+
 import { CommandBar } from "@/components/CommandBar";
 import { NetWorthCenter } from "@/components/NetWorthCenter";
 import { TransactionIntelligence } from "@/components/TransactionIntelligence";
