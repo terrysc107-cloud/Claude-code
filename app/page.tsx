@@ -6,6 +6,7 @@ import { TransactionIntelligence } from "@/components/TransactionIntelligence";
 import RealEstateCommand from "@/components/RealEstateCommand";
 import BusinessIncome from "@/components/BusinessIncome";
 import AIInsightsFeed from "@/components/AIInsightsFeed";
+import PendingActions from "@/components/PendingActions";
 
 export default function DashboardPage() {
   return (
@@ -49,7 +50,10 @@ export default function DashboardPage() {
           {/* MODULE 5: Business Income */}
           <BusinessIncome />
 
-          {/* MODULE 6: AI Insights Feed — full width */}
+          {/* MODULE 6: Pending Actions — email-sourced items to acknowledge */}
+          <PendingActions />
+
+          {/* MODULE 7: AI Insights Feed — full width */}
           <div className="xl:col-span-2">
             <AIInsightsFeed />
           </div>
