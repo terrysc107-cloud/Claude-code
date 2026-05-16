@@ -5,8 +5,6 @@ import { RefreshCw } from "lucide-react";
 import {
   LineChart,
   Line,
-  BarChart,
-  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -126,40 +124,6 @@ function ChartTooltip({
   );
 }
 
-function BarTooltip({
-  active,
-  payload,
-  label,
-}: {
-  active?: boolean;
-  payload?: { name: string; value: number; fill: string }[];
-  label?: string;
-}) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div
-      className="terminal-card p-3"
-      style={{ minWidth: 180, fontSize: 11, fontFamily: "monospace" }}
-    >
-      <p style={{ color: "var(--text-secondary)", marginBottom: 6 }}>{label}</p>
-      {payload.map((entry) => (
-        <div
-          key={entry.name}
-          className="flex justify-between gap-4"
-          style={{ color: entry.fill }}
-        >
-          <span className="uppercase tracking-wider" style={{ opacity: 0.8 }}>
-            {entry.name}
-          </span>
-          <span className="font-semibold tabular-nums">
-            {formatCurrency(entry.value, { compact: true })}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function NetWorthCenter() {
@@ -257,29 +221,6 @@ export function NetWorthCenter() {
     grossAssets: s.gross_assets,
     totalDebt: s.total_debt,
   }));
-
-  // Stacked bar — derive allocation from latest known balances applied to last 3 snapshots
-  const totalPropertyEquity = properties.reduce(
-    (sum, p) => sum + ((p.current_value ?? 0) - (p.debt_balance ?? 0)),
-    0
-  );
-  const totalInvestments = investments.reduce(
-    (sum, a) => sum + (a.current_balance ?? 0),
-    0
-  );
-
-  const last3Snapshots = snapshots.slice(-3);
-  const barData = last3Snapshots.map((s) => {
-    const reEquity = Math.min(totalPropertyEquity, s.net_worth);
-    const invPortion = Math.min(totalInvestments, Math.max(s.net_worth - reEquity, 0));
-    const cash = Math.max(s.net_worth - reEquity - invPortion, 0);
-    return {
-      date: formatDate(s.snapshot_date, "month-year"),
-      "RE Equity": reEquity,
-      Investments: invPortion,
-      Cash: cash,
-    };
-  });
 
   // ── Asset table derived values ────────────────────────────────────────────
 
@@ -474,81 +415,6 @@ export function NetWorthCenter() {
           </div>
         </div>
 
-        {/* Equity composition — stacked bar */}
-        <div className="terminal-card">
-          <div className="panel-header">
-            <span className="panel-title">EQUITY COMPOSITION</span>
-            <span
-              className="font-mono text-xs"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              LAST 3 SNAPSHOTS
-            </span>
-          </div>
-
-          <div className="p-4" style={chartBg}>
-            {loading ? (
-              <div className="skeleton" style={{ height: 160 }} />
-            ) : barData.length === 0 ? (
-              <div
-                className="flex items-center justify-center font-mono text-xs"
-                style={{ height: 160, color: "var(--text-secondary)" }}
-              >
-                No data
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={160}>
-                <BarChart
-                  data={barData}
-                  margin={{ top: 4, right: 16, bottom: 0, left: 8 }}
-                >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="#2a2a2a"
-                    vertical={false}
-                  />
-                  <XAxis
-                    dataKey="date"
-                    tick={{
-                      fontSize: 10,
-                      fontFamily: "monospace",
-                      fill: "#888",
-                    }}
-                    axisLine={{ stroke: "#2a2a2a" }}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    tickFormatter={yAxisFormatter}
-                    tick={{
-                      fontSize: 10,
-                      fontFamily: "monospace",
-                      fill: "#888",
-                    }}
-                    axisLine={false}
-                    tickLine={false}
-                    width={60}
-                  />
-                  <Tooltip content={<BarTooltip />} />
-                  <Legend
-                    wrapperStyle={{
-                      fontSize: 10,
-                      fontFamily: "monospace",
-                      paddingTop: 4,
-                    }}
-                  />
-                  <Bar dataKey="RE Equity" stackId="nw" fill="#ffaa00" />
-                  <Bar dataKey="Investments" stackId="nw" fill="#00ff88" />
-                  <Bar
-                    dataKey="Cash"
-                    stackId="nw"
-                    fill="#4488cc"
-                    radius={[2, 2, 0, 0]}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
