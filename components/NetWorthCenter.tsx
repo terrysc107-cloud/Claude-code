@@ -24,29 +24,22 @@ import type {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface InvestmentAccount {
-  label: string;
-  contextKey: string;
-  value: number | null;
+interface InvestmentAccountRow {
+  id: string;
+  account_name: string;
+  account_type: string;
+  current_balance: number;
+  monthly_contribution: number;
+  strategy: string | null;
+  last_updated: string | null;
 }
 
 interface NetWorthCenterState {
   snapshots: NetWorthSnapshot[];
   properties: Property[];
-  investments: InvestmentAccount[];
+  investments: InvestmentAccountRow[];
   error: string | null;
 }
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const INVESTMENT_ACCOUNTS: Omit<InvestmentAccount, "value">[] = [
-  { label: "M1 Finance", contextKey: "m1_balance" },
-  { label: "ThinkorSwim", contextKey: "thinkorswim_balance" },
-  { label: "Roth IRA", contextKey: "roth_ira_balance" },
-  { label: "BTC", contextKey: "btc_balance" },
-  { label: "401(k)", contextKey: "401k_balance" },
-  { label: "Options", contextKey: "options_balance" },
-];
 
 const TARGET_LINES = [
   { value: 2_500_000, label: "Y1 $2.5M" },
@@ -160,7 +153,7 @@ export function NetWorthCenter() {
   const [state, setState] = useState<NetWorthCenterState>({
     snapshots: [],
     properties: [],
-    investments: INVESTMENT_ACCOUNTS.map((a) => ({ ...a, value: null })),
+    investments: [],
     error: null,
   });
   const [loading, setLoading] = useState(true);
@@ -169,9 +162,7 @@ export function NetWorthCenter() {
     const supabase = createBrowserClient();
 
     try {
-      const contextKeys = INVESTMENT_ACCOUNTS.map((a) => a.contextKey);
-
-      const [snapshotsResult, propertiesResult, contextResult] =
+      const [snapshotsResult, propertiesResult, investmentsResult] =
         await Promise.all([
           supabase
             .schema("north_star")
@@ -193,31 +184,19 @@ export function NetWorthCenter() {
 
           supabase
             .schema("north_star")
-            .from("context_store")
-            .select("key, value, client_id")
+            .from("investment_accounts")
+            .select("id, account_name, account_type, current_balance, monthly_contribution, strategy, last_updated")
             .eq("client_id", CLIENT_ID)
-            .in("key", contextKeys),
+            .order("current_balance", { ascending: false }),
         ]);
 
       if (snapshotsResult.error) throw snapshotsResult.error;
       if (propertiesResult.error) throw propertiesResult.error;
 
-      const contextMap: Record<string, string> = {};
-      for (const entry of contextResult.data ?? []) {
-        contextMap[entry.key] = entry.value;
-      }
-
-      const investments = INVESTMENT_ACCOUNTS.map((account) => {
-        const raw = contextMap[account.contextKey];
-        if (raw == null) return { ...account, value: null };
-        const parsed = parseFloat(raw);
-        return { ...account, value: isNaN(parsed) ? null : parsed };
-      });
-
       setState({
         snapshots: snapshotsResult.data ?? [],
         properties: propertiesResult.data ?? [],
-        investments,
+        investments: (investmentsResult.data as InvestmentAccountRow[]) ?? [],
         error: null,
       });
     } catch (err) {
@@ -252,7 +231,7 @@ export function NetWorthCenter() {
     0
   );
   const totalInvestments = investments.reduce(
-    (sum, a) => sum + (a.value ?? 0),
+    (sum, a) => sum + (a.current_balance ?? 0),
     0
   );
 
@@ -317,6 +296,48 @@ export function NetWorthCenter() {
               </span>
             )}
           </div>
+
+          {/* Gap-to-Goal callout */}
+          {!loading && netWorth !== null && (() => {
+            const nextMilestone = TARGET_LINES.find((t) => t.value > netWorth);
+            if (!nextMilestone) return null;
+            const gap = nextMilestone.value - netWorth;
+            // Estimate months to milestone using avg monthly growth from snapshots
+            let paceMonths: number | null = null;
+            if (snapshots.length >= 2) {
+              const first = snapshots[0];
+              const last = snapshots[snapshots.length - 1];
+              const months = Math.max(
+                (new Date(last.snapshot_date).getTime() - new Date(first.snapshot_date).getTime()) /
+                  (1000 * 60 * 60 * 24 * 30.44),
+                1
+              );
+              const monthlyGrowth = (last.net_worth - first.net_worth) / months;
+              if (monthlyGrowth > 0) paceMonths = gap / monthlyGrowth;
+            }
+            const paceDate = paceMonths
+              ? (() => {
+                  const d = new Date();
+                  d.setMonth(d.getMonth() + Math.round(paceMonths));
+                  return d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+                })()
+              : null;
+            return (
+              <div
+                className="mx-4 mt-3 mb-0 px-3 py-2 rounded-sm flex items-center justify-between"
+                style={{ backgroundColor: "rgba(0,255,136,0.05)", border: "1px solid rgba(0,255,136,0.15)" }}
+              >
+                <span className="font-mono text-xs" style={{ color: "var(--accent-green)" }}>
+                  → {formatCurrency(gap, { compact: true })} gap to {nextMilestone.label}
+                </span>
+                {paceDate && (
+                  <span className="font-mono text-xs" style={{ color: "var(--text-secondary)" }}>
+                    on pace: {paceDate}
+                  </span>
+                )}
+              </div>
+            );
+          })()}
 
           <div className="p-4" style={chartBg}>
             {loading ? (
@@ -665,13 +686,29 @@ export function NetWorthCenter() {
         <div className="terminal-card">
           <div className="panel-header">
             <span className="panel-title">INVESTMENT ACCOUNTS</span>
+            {!loading && investments.length > 0 && (() => {
+              const dates = investments
+                .filter((a) => a.last_updated)
+                .map((a) => a.last_updated as string)
+                .sort();
+              const oldest = dates[0];
+              if (!oldest) return null;
+              const daysAgo = Math.round(
+                (Date.now() - new Date(oldest).getTime()) / (1000 * 60 * 60 * 24)
+              );
+              return (
+                <span className="font-mono text-xs" style={{ color: daysAgo > 14 ? "var(--accent-amber)" : "var(--text-secondary)" }}>
+                  updated {daysAgo}d ago
+                </span>
+              );
+            })()}
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full" style={{ fontSize: 11 }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                  {["ACCOUNT", "BALANCE"].map((h) => (
+                  {["ACCOUNT", "TYPE", "BALANCE", "+/MO"].map((h) => (
                     <th
                       key={h}
                       className="px-3 py-2 text-left font-mono uppercase tracking-wider"
@@ -688,32 +725,43 @@ export function NetWorthCenter() {
               </thead>
               <tbody>
                 {loading
-                  ? Array.from({ length: 6 }).map((_, i) => (
-                      <TableRowSkeleton key={i} cols={2} />
+                  ? Array.from({ length: 5 }).map((_, i) => (
+                      <TableRowSkeleton key={i} cols={4} />
                     ))
                   : investments.map((account) => (
                       <tr
-                        key={account.contextKey}
+                        key={account.id}
                         style={{ borderBottom: "1px solid var(--border)" }}
                         className="hover:bg-surface-2 transition-colors"
                       >
                         <td
                           className="px-3 py-2 font-mono"
-                          style={{ color: "var(--text-secondary)" }}
+                          style={{ color: "var(--text-primary)" }}
                         >
-                          {account.label}
+                          {account.account_name}
+                        </td>
+                        <td
+                          className="px-3 py-2 font-mono uppercase"
+                          style={{ color: "var(--text-secondary)", fontSize: 10 }}
+                        >
+                          {account.account_type}
                         </td>
                         <td
                           className="px-3 py-2 mono-num tabular-nums font-semibold"
                           style={{
-                            color:
-                              account.value !== null
-                                ? "var(--accent-green)"
-                                : "var(--text-secondary)",
+                            color: account.current_balance > 0
+                              ? "var(--accent-green)"
+                              : "var(--text-secondary)",
                           }}
                         >
-                          {account.value !== null
-                            ? formatCurrency(account.value)
+                          {formatCurrency(account.current_balance)}
+                        </td>
+                        <td
+                          className="px-3 py-2 mono-num tabular-nums"
+                          style={{ color: "var(--text-secondary)" }}
+                        >
+                          {account.monthly_contribution > 0
+                            ? `+${formatCurrency(account.monthly_contribution)}`
                             : "—"}
                         </td>
                       </tr>
