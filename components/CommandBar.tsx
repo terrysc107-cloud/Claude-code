@@ -21,6 +21,7 @@ interface CommandBarState {
   vacancyBleed: number;
   nextGoal: { name: string; daysUntil: number } | null;
   lastUpdated: Date | null;
+  lastTxDate: string | null;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -78,6 +79,7 @@ export function CommandBar() {
     vacancyBleed: 0,
     nextGoal: null,
     lastUpdated: null,
+    lastTxDate: null,
   });
   const [loading, setLoading] = useState(true);
   const [blink, setBlink] = useState(true);
@@ -99,7 +101,7 @@ export function CommandBar() {
         .slice(0, 10);
 
       // Fire all queries in parallel
-      const [snapResult, propertiesResult, goalsResult, txResult] =
+      const [snapResult, propertiesResult, goalsResult, txResult, lastTxResult] =
         await Promise.all([
           supabase
             .schema("north_star")
@@ -128,6 +130,13 @@ export function CommandBar() {
             .select("amount, name, category_primary")
             .gte("date", monthStart)
             .lte("date", monthEnd),
+
+          supabase
+            .from("transactions")
+            .select("date")
+            .order("date", { ascending: false })
+            .limit(1)
+            .single(),
         ]);
 
       // Net worth
@@ -184,6 +193,7 @@ export function CommandBar() {
         vacancyBleed,
         nextGoal,
         lastUpdated: new Date(),
+        lastTxDate: lastTxResult.data?.date ?? null,
       });
     } catch (err) {
       console.error("[CommandBar] fetch error:", err);
@@ -204,6 +214,7 @@ export function CommandBar() {
     vacancyBleed,
     nextGoal,
     lastUpdated,
+    lastTxDate,
   } = state;
 
   // Cash flow color logic
@@ -382,34 +393,34 @@ export function CommandBar() {
               )}
             </div>
 
-            {/* ── LAST UPDATED ── */}
+            {/* ── TX SYNC ── */}
             <div className="flex flex-col justify-center gap-0.5 px-4 shrink-0 h-full">
               <span className="data-label" style={{ fontSize: 9 }}>
-                LAST UPDATED
+                TX SYNC
               </span>
-              <span
-                className="mono-num"
-                style={{ fontSize: 12, color: "var(--text-secondary)" }}
-              >
-                {lastUpdated
-                  ? lastUpdated.toLocaleTimeString("en-US", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      second: "2-digit",
-                    })
-                  : "—"}
-              </span>
-              <span
-                style={{ fontSize: 10, color: "var(--text-secondary)", fontFamily: "monospace", opacity: 0.6 }}
-              >
-                {lastUpdated
-                  ? lastUpdated.toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    })
-                  : ""}
-              </span>
+              {lastTxDate ? (() => {
+                const daysAgo = Math.round(
+                  (Date.now() - new Date(lastTxDate).getTime()) / (1000 * 60 * 60 * 24)
+                );
+                const stale = daysAgo > 7;
+                const color = daysAgo <= 1
+                  ? "var(--accent-green)"
+                  : daysAgo <= 7
+                  ? "var(--accent-amber)"
+                  : "var(--accent-red)";
+                return (
+                  <>
+                    <span className="mono-num font-semibold" style={{ fontSize: 13, color }}>
+                      {daysAgo === 0 ? "TODAY" : `${daysAgo}d AGO`}
+                    </span>
+                    <span style={{ fontSize: 10, color: "var(--text-secondary)", fontFamily: "monospace" }}>
+                      {stale ? "⚠ STALE" : lastTxDate}
+                    </span>
+                  </>
+                );
+              })() : (
+                <span className="mono-num" style={{ fontSize: 13, color: "var(--text-secondary)" }}>—</span>
+              )}
             </div>
           </div>
         )}

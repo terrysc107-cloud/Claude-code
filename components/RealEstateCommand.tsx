@@ -114,8 +114,15 @@ function CashFlowTooltip({ active, payload, label }: CustomTooltipProps) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
+interface RentCollectionEntry {
+  month_period: string;
+  amount: number;
+}
+
 export default function RealEstateCommand() {
   const [properties, setProperties] = useState<Property[]>([]);
+  const [rentCollected, setRentCollected] = useState<number | null>(null);
+  const [rentMonth, setRentMonth] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -124,14 +131,38 @@ export default function RealEstateCommand() {
     setError(null);
     try {
       const supabase = createBrowserClient();
-      const { data, error: dbErr } = await supabase
-        .schema('north_star')
-        .from('properties')
-        .select('*')
-        .eq('client_id', CLIENT_ID);
+      const now = new Date();
+      const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const prevPeriod = (() => {
+        const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      })();
 
-      if (dbErr) throw new Error(dbErr.message);
-      setProperties((data as Property[]) ?? []);
+      const [propResult, rentResult] = await Promise.all([
+        supabase
+          .schema('north_star')
+          .from('properties')
+          .select('*')
+          .eq('client_id', CLIENT_ID),
+        supabase
+          .schema('north_star')
+          .from('income_streams')
+          .select('month_period, amount')
+          .eq('client_id', CLIENT_ID)
+          .eq('source', 'Real Estate')
+          .in('month_period', [currentPeriod, prevPeriod])
+          .order('month_period', { ascending: false })
+          .limit(1),
+      ]);
+
+      if (propResult.error) throw new Error(propResult.error.message);
+      setProperties((propResult.data as Property[]) ?? []);
+
+      const rentEntry = (rentResult.data as RentCollectionEntry[] | null)?.[0];
+      if (rentEntry) {
+        setRentCollected(rentEntry.amount);
+        setRentMonth(rentEntry.month_period);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load properties');
     } finally {
@@ -187,6 +218,12 @@ export default function RealEstateCommand() {
   const draggingProperties = withCF
     .filter((p) => p.netCF < 0)
     .sort((a, b) => a.netCF - b.netCF);
+  const cfPositiveCount = withCF.filter((p) => p.netCF >= 0).length;
+
+  // Rent collection: expected = sum of occupied properties' monthly_rent
+  const occupiedMonthlyRent = withCF
+    .filter((p) => !isVacant(p.vacancy_status))
+    .reduce((s, p) => s + (p.monthly_rent ?? 0), 0);
 
   return (
     <div className="space-y-4">
@@ -425,11 +462,16 @@ export default function RealEstateCommand() {
       <div className="terminal-card">
         <div className="panel-header">
           <span className="panel-title">Stabilization Progress</span>
-          {isStabilized && (
-            <span className="text-xs font-mono text-accent-green font-semibold">
-              STABILIZED ✓
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-mono text-[#888]">
+              {cfPositiveCount}/{withCF.length} CF+
             </span>
-          )}
+            {isStabilized && (
+              <span className="text-xs font-mono text-accent-green font-semibold">
+                STABILIZED ✓
+              </span>
+            )}
+          </div>
         </div>
         <div className="p-4 space-y-4">
           {/* Current CF vs target */}
@@ -514,6 +556,63 @@ export default function RealEstateCommand() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Section E — Rent Collection Status ─────────────────────────────── */}
+      <div className="terminal-card">
+        <div className="panel-header">
+          <span className="panel-title">Rent Collection</span>
+          {rentMonth && (
+            <span className="text-xs font-mono text-[#888]">{rentMonth}</span>
+          )}
+        </div>
+        <div className="p-4">
+          {rentCollected === null ? (
+            <p className="text-xs font-mono text-[#888] text-center uppercase tracking-widest py-2">
+              No collection data for current period
+            </p>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-end justify-between">
+                <div>
+                  <p className="data-label mb-1">COLLECTED</p>
+                  <p className="font-mono tabular-nums text-2xl font-bold text-accent-green">
+                    {formatCurrency(rentCollected)}/mo
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="data-label mb-1">EXPECTED (OCCUPIED)</p>
+                  <p className="font-mono tabular-nums text-xl text-accent-amber">
+                    {formatCurrency(occupiedMonthlyRent)}/mo
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <div className="progress-track h-2">
+                  <div
+                    className="progress-fill"
+                    style={{
+                      width: `${Math.min((rentCollected / Math.max(occupiedMonthlyRent, 1)) * 100, 100)}%`,
+                      backgroundColor: rentCollected >= occupiedMonthlyRent ? '#00ff88' : '#ffaa00',
+                    }}
+                  />
+                </div>
+                <div className="flex justify-between">
+                  <span className="data-label">
+                    {occupiedMonthlyRent > 0
+                      ? `${((rentCollected / occupiedMonthlyRent) * 100).toFixed(0)}% of expected`
+                      : '—'}
+                  </span>
+                  {rentCollected < occupiedMonthlyRent && (
+                    <span className="data-label text-accent-amber">
+                      {formatCurrency(occupiedMonthlyRent - rentCollected)} gap
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </div>

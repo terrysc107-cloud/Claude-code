@@ -6,7 +6,6 @@ import MonthlyPL from '@/components/tabs/MonthlyPL';
 import SpendCategories from '@/components/tabs/SpendCategories';
 import { RecurringSpend } from '@/components/tabs/RecurringSpend';
 import { CashFlowTrend } from '@/components/tabs/CashFlowTrend';
-import { QuarterlyReport } from '@/components/tabs/QuarterlyReport';
 import { formatMonthKey } from '@/lib/formatters';
 
 function currentMonthKey(): string {
@@ -54,7 +53,6 @@ export function TransactionIntelligence() {
             <TabsTrigger value="categories">Spend Categories</TabsTrigger>
             <TabsTrigger value="recurring">Recurring</TabsTrigger>
             <TabsTrigger value="cashflow">Cash Flow</TabsTrigger>
-            <TabsTrigger value="quarterly">Quarterly Report</TabsTrigger>
           </TabsList>
 
           <TabsContent value="monthly-pl">
@@ -74,10 +72,6 @@ export function TransactionIntelligence() {
 
           <TabsContent value="cashflow">
             <CashFlowTrend />
-          </TabsContent>
-
-          <TabsContent value="quarterly">
-            <QuarterlyReport />
           </TabsContent>
         </Tabs>
       </div>

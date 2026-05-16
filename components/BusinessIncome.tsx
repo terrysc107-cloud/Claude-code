@@ -2,103 +2,121 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import {
-  AreaChart,
-  Area,
+  BarChart,
+  Bar,
   ResponsiveContainer,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ReferenceLine,
-  Legend,
+  Cell,
 } from 'recharts';
-import { AlertTriangle, RefreshCw, CheckCircle } from 'lucide-react';
+import { AlertTriangle, RefreshCw, CheckCircle, TrendingDown, TrendingUp } from 'lucide-react';
 import { createBrowserClient, CLIENT_ID } from '@/lib/supabase';
 import { formatCurrency, formatPercent, formatDate, daysUntil } from '@/lib/formatters';
-import type { IncomeStream, Goal } from '@/types';
+import type { Goal } from '@/types';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface RawIncomeEntry {
+  id: string;
+  client_id: string;
+  month_period: string;
+  source: string;
+  amount: number;
+  notes: string | null;
+}
+
+interface SourceStats {
+  source: string;
+  color: string;
+  ytd: number;
+  lastPeriod: string;
+  lastAmount: number;
+  prevAmount: number;
+  monthlyData: { period: string; amount: number }[];
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const YEAR_TARGETS: { year: string; label: string; value: number; color: string }[] = [
-  { year: 'Y1', label: '$625K', value: 625_000, color: '#ffaa00' },
-  { year: 'Y2', label: '$1.2M', value: 1_200_000, color: '#888' },
-  { year: 'Y3', label: '$2M', value: 2_000_000, color: '#00ff88' },
-  { year: 'Y5', label: '$3M', value: 3_000_000, color: '#ff4444' },
+// Annual revenue targets for all income sources combined
+const YEAR_TARGETS = [
+  { label: 'Y1 $625K', value: 625_000, color: '#ffaa00' },
+  { label: 'Y2 $1.2M', value: 1_200_000, color: '#888' },
+  { label: 'Y3 $2M', value: 2_000_000, color: '#00ff88' },
 ];
 
-// Distinct colors for each income stream area
-const STREAM_COLORS = [
-  '#00ff88',
-  '#ffaa00',
-  '#4488ff',
-  '#ff88cc',
-  '#aa44ff',
-  '#44ffee',
-  '#ffee44',
-  '#ff6644',
-];
+const SOURCE_COLORS: Record<string, string> = {
+  ATS: '#00ff88',
+  'Real Estate': '#ffaa00',
+  W2: '#4488ff',
+  Consulting: '#ff88cc',
+  Portfolio: '#aa44ff',
+};
+const DEFAULT_COLOR = '#44ffee';
 
-const CHART_YEARS = ['Y1', 'Y2', 'Y3', 'Y4', 'Y5'] as const;
+function sourceColor(source: string): string {
+  return SOURCE_COLORS[source] ?? DEFAULT_COLOR;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/**
- * Interpolate a value at a given year index (0-4 = Y1-Y5) between
- * current_annual (Y0→Y1 boundary), projected_year3 (Y3), projected_year5 (Y5).
- * Linear segments: Y1→Y3 and Y3→Y5.
- */
-function interpolateIncome(stream: IncomeStream, yearIdx: number): number {
-  // yearIdx: 0=Y1, 1=Y2, 2=Y3, 3=Y4, 4=Y5
-  if (yearIdx <= 2) {
-    // Linear from current_annual (Y1) to projected_year3 (Y3)
-    const t = yearIdx / 2;
-    return stream.current_annual + t * (stream.projected_year3 - stream.current_annual);
-  } else {
-    // Linear from projected_year3 (Y3) to projected_year5 (Y5)
-    const t = (yearIdx - 2) / 2;
-    return stream.projected_year3 + t * (stream.projected_year5 - stream.projected_year3);
-  }
+function currentYearPrefix(): string {
+  return String(new Date().getFullYear());
 }
 
-/**
- * Build recharts-ready data for the stacked area chart.
- * Each data point is { year, [streamKey]: value, total }.
- */
-function buildChartData(streams: IncomeStream[]) {
-  return CHART_YEARS.map((yr, yIdx) => {
-    const point: Record<string, string | number> = { year: yr };
-    let total = 0;
-    for (const s of streams) {
-      const key = streamKey(s);
-      const val = Math.round(interpolateIncome(s, yIdx));
-      point[key] = val;
-      total += val;
-    }
-    point.total = Math.round(total);
-    return point;
+function aggregateSources(entries: RawIncomeEntry[]): SourceStats[] {
+  const year = currentYearPrefix();
+  const bySource = new Map<string, RawIncomeEntry[]>();
+  for (const e of entries) {
+    const arr = bySource.get(e.source) ?? [];
+    arr.push(e);
+    bySource.set(e.source, arr);
+  }
+
+  return Array.from(bySource.entries()).map(([source, rows]) => {
+    const sorted = [...rows].sort((a, b) => b.month_period.localeCompare(a.month_period));
+    const ytd = rows
+      .filter((r) => r.month_period.startsWith(year))
+      .reduce((s, r) => s + r.amount, 0);
+    const lastAmount = sorted[0]?.amount ?? 0;
+    const lastPeriod = sorted[0]?.month_period ?? '';
+    const prevAmount = sorted[1]?.amount ?? 0;
+    const monthlyData = [...rows]
+      .sort((a, b) => a.month_period.localeCompare(b.month_period))
+      .map((r) => ({ period: r.month_period, amount: r.amount }));
+    return { source, color: sourceColor(source), ytd, lastPeriod, lastAmount, prevAmount, monthlyData };
   });
 }
 
-function streamKey(s: IncomeStream): string {
-  return s.id;
-}
+function buildChartData(entries: RawIncomeEntry[]): Record<string, string | number>[] {
+  // Get all unique periods, sorted ascending
+  const periods = Array.from(new Set(entries.map((e) => e.month_period))).sort();
+  const sources = Array.from(new Set(entries.map((e) => e.source)));
 
-function streamLabel(s: IncomeStream): string {
-  return s.stream_name.toUpperCase();
+  return periods.map((period) => {
+    const row: Record<string, string | number> = { period };
+    let total = 0;
+    for (const src of sources) {
+      const entry = entries.find((e) => e.month_period === period && e.source === src);
+      const val = entry?.amount ?? 0;
+      row[src] = val;
+      total += val;
+    }
+    row.total = total;
+    return row;
+  });
 }
 
 function goalStatus(goal: Goal, now: Date): 'COMPLETE' | 'OVERDUE' | 'AT_RISK' | 'ON_TRACK' {
   const pct = goal.target_value > 0 ? goal.current_value / goal.target_value : 0;
   if (pct >= 1) return 'COMPLETE';
-
   const deadline = new Date(goal.target_date);
   if (deadline < now) return 'OVERDUE';
-
   const days = daysUntil(goal.target_date);
-  const gap = goal.target_value - goal.current_value;
-  const gapPct = goal.target_value > 0 ? gap / goal.target_value : 0;
+  const gapPct = goal.target_value > 0 ? (goal.target_value - goal.current_value) / goal.target_value : 0;
   if (gapPct > 0.2 && days < 90) return 'AT_RISK';
-
   return 'ON_TRACK';
 }
 
@@ -139,109 +157,9 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
   );
 }
 
-interface StreamCardProps {
-  stream: IncomeStream;
-  color: string;
-}
-
-function StreamCard({ stream, color }: StreamCardProps) {
-  const y3Progress = stream.projected_year3 > 0
-    ? Math.min((stream.current_annual / stream.projected_year3) * 100, 100)
-    : 0;
-
-  return (
-    <div className="terminal-card p-4 space-y-3">
-      <div className="flex items-start justify-between gap-2">
-        <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-[#e8e8e8] leading-tight">
-          {stream.stream_name}
-        </h3>
-        <div
-          className="w-2 h-2 rounded-full flex-shrink-0 mt-1"
-          style={{ backgroundColor: color }}
-        />
-      </div>
-
-      <div>
-        <p className="data-label mb-0.5">CURRENT ANNUAL</p>
-        <p className="font-mono tabular-nums text-2xl font-bold" style={{ color }}>
-          {formatCurrency(stream.current_annual, { compact: true })}
-        </p>
-      </div>
-
-      {/* Progress toward Y3 */}
-      <div className="space-y-1">
-        <div className="flex justify-between items-center">
-          <span className="data-label">TOWARD YEAR 3</span>
-          <span className="text-xs font-mono" style={{ color }}>
-            {y3Progress.toFixed(0)}%
-          </span>
-        </div>
-        <div className="progress-track">
-          <div
-            className="progress-fill"
-            style={{ width: `${y3Progress}%`, backgroundColor: color }}
-          />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 pt-1 border-t border-[#2a2a2a]">
-        <div>
-          <p className="data-label mb-0.5">YEAR 3 TARGET</p>
-          <p className="mono-num text-sm text-[#e8e8e8]">
-            {formatCurrency(stream.projected_year3, { compact: true })}
-          </p>
-        </div>
-        <div>
-          <p className="data-label mb-0.5">YEAR 5 TARGET</p>
-          <p className="mono-num text-sm text-[#e8e8e8]">
-            {formatCurrency(stream.projected_year5, { compact: true })}
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-interface TooltipProps {
-  active?: boolean;
-  payload?: Array<{ name: string; value: number; color: string; dataKey: string }>;
-  label?: string;
-  streams: IncomeStream[];
-}
-
-function IncomeTooltip({ active, payload, label, streams }: TooltipProps) {
-  if (!active || !payload?.length) return null;
-  const total = payload.reduce((s, p) => s + (p.value || 0), 0);
-  return (
-    <div className="bg-[#1a1a1a] border border-[#2a2a2a] px-3 py-2 rounded-sm text-xs font-mono min-w-[160px]">
-      <p className="text-[#888] mb-2 border-b border-[#2a2a2a] pb-1">{label}</p>
-      {[...payload].reverse().map((p) => {
-        const stream = streams.find((s) => s.id === p.dataKey);
-        return (
-          <div key={p.dataKey} className="flex justify-between gap-4 mb-1">
-            <span style={{ color: p.color }} className="truncate max-w-[100px]">
-              {stream?.stream_name ?? p.name}
-            </span>
-            <span className="tabular-nums text-[#e8e8e8]">
-              {formatCurrency(p.value, { compact: true })}
-            </span>
-          </div>
-        );
-      })}
-      <div className="flex justify-between gap-4 pt-1 border-t border-[#2a2a2a] font-semibold">
-        <span className="text-[#e8e8e8]">TOTAL</span>
-        <span className="text-accent-green tabular-nums">
-          {formatCurrency(total, { compact: true })}
-        </span>
-      </div>
-    </div>
-  );
-}
-
 interface StatusBadgeProps {
   status: 'COMPLETE' | 'OVERDUE' | 'AT_RISK' | 'ON_TRACK';
 }
-
 function StatusBadge({ status }: StatusBadgeProps) {
   const config = {
     COMPLETE: { label: 'COMPLETE', className: 'text-[#888] border-[#444]' },
@@ -249,11 +167,8 @@ function StatusBadge({ status }: StatusBadgeProps) {
     AT_RISK: { label: 'AT RISK', className: 'text-accent-amber border-accent-amber' },
     ON_TRACK: { label: 'ON TRACK', className: 'text-accent-green border-accent-green' },
   }[status];
-
   return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 text-[10px] font-mono font-semibold uppercase tracking-wider border rounded-sm ${config.className}`}
-    >
+    <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-mono font-semibold uppercase tracking-wider border rounded-sm ${config.className}`}>
       {config.label}
     </span>
   );
@@ -262,7 +177,7 @@ function StatusBadge({ status }: StatusBadgeProps) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function BusinessIncome() {
-  const [streams, setStreams] = useState<IncomeStream[]>([]);
+  const [entries, setEntries] = useState<RawIncomeEntry[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -272,25 +187,26 @@ export default function BusinessIncome() {
     setError(null);
     try {
       const supabase = createBrowserClient();
-
       const [streamsResult, goalsResult] = await Promise.all([
         supabase
           .schema('north_star')
           .from('income_streams')
-          .select('*')
-          .eq('client_id', CLIENT_ID),
+          .select('id, client_id, month_period, source, amount, notes')
+          .eq('client_id', CLIENT_ID)
+          .order('month_period', { ascending: true }),
         supabase
           .schema('north_star')
           .from('goals')
           .select('*')
           .eq('client_id', CLIENT_ID)
+          .gte('target_value', 1000)
           .order('target_date', { ascending: true }),
       ]);
 
       if (streamsResult.error) throw new Error(streamsResult.error.message);
       if (goalsResult.error) throw new Error(goalsResult.error.message);
 
-      setStreams((streamsResult.data as IncomeStream[]) ?? []);
+      setEntries((streamsResult.data as RawIncomeEntry[]) ?? []);
       setGoals((goalsResult.data as Goal[]) ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data');
@@ -307,89 +223,154 @@ export default function BusinessIncome() {
   if (error) return <ErrorState message={error} onRetry={fetchData} />;
 
   const now = new Date();
-  const chartData = buildChartData(streams);
+  const year = currentYearPrefix();
+  const sources = aggregateSources(entries);
+  const chartData = buildChartData(entries);
+  const sourceNames = Array.from(new Set(entries.map((e) => e.source)));
 
-  // Total current annual across all streams
-  const totalCurrentAnnual = streams.reduce((s, st) => s + st.current_annual, 0);
+  const atsStats = sources.find((s) => s.source === 'ATS');
+  const ytdAllSources = sources.reduce((s, src) => s + src.ytd, 0);
+
+  // Monthly run rate (current year months with data)
+  const ytdMonthCount = (() => {
+    const periods = Array.from(new Set(
+      entries.filter((e) => e.month_period.startsWith(year)).map((e) => e.month_period)
+    ));
+    return Math.max(periods.length, 1);
+  })();
+  const annualRunRate = (ytdAllSources / ytdMonthCount) * 12;
 
   return (
     <div className="space-y-4">
-      {/* ── Section A — Income Stream Cards ──────────────────────────────── */}
+
+      {/* ── Section A — ATS KPI Hero ──────────────────────────────────────── */}
+      {atsStats && (
+        <div className="terminal-card">
+          <div className="panel-header">
+            <span className="panel-title">ATS DISTRIBUTIONS</span>
+            <span className="text-xs font-mono text-accent-green font-semibold">
+              PRIMARY INCOME
+            </span>
+          </div>
+          <div className="p-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div>
+              <p className="data-label mb-1">LAST DISTRIBUTION</p>
+              <p className="font-mono tabular-nums text-2xl font-bold text-accent-green">
+                {formatCurrency(atsStats.lastAmount)}
+              </p>
+              <p className="text-[10px] font-mono text-[#888] mt-0.5">{atsStats.lastPeriod}</p>
+            </div>
+            <div>
+              <p className="data-label mb-1">MOM CHANGE</p>
+              {(() => {
+                const delta = atsStats.lastAmount - atsStats.prevAmount;
+                const pct = atsStats.prevAmount > 0 ? (delta / atsStats.prevAmount) * 100 : 0;
+                const up = delta >= 0;
+                return (
+                  <div className="flex items-baseline gap-1">
+                    {up ? (
+                      <TrendingUp size={14} className="text-accent-green" />
+                    ) : (
+                      <TrendingDown size={14} className="text-accent-red" />
+                    )}
+                    <p
+                      className="font-mono tabular-nums text-xl font-bold"
+                      style={{ color: up ? 'var(--accent-green)' : 'var(--accent-red)' }}
+                    >
+                      {up ? '+' : ''}{formatCurrency(delta)}
+                    </p>
+                    <span className="text-xs font-mono text-[#888]">
+                      ({pct.toFixed(0)}%)
+                    </span>
+                  </div>
+                );
+              })()}
+            </div>
+            <div>
+              <p className="data-label mb-1">YTD {year}</p>
+              <p className="font-mono tabular-nums text-xl font-bold text-[#e8e8e8]">
+                {formatCurrency(atsStats.ytd, { compact: true })}
+              </p>
+              <p className="text-[10px] font-mono text-[#888] mt-0.5">
+                {ytdMonthCount} mo recorded
+              </p>
+            </div>
+            <div>
+              <p className="data-label mb-1">ANN. RUN RATE</p>
+              <p className="font-mono tabular-nums text-xl font-bold text-accent-amber">
+                {formatCurrency((atsStats.ytd / ytdMonthCount) * 12, { compact: true })}
+              </p>
+              <p className="text-[10px] font-mono text-[#888] mt-0.5">distributions only</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Section B — Income by Source Cards ───────────────────────────── */}
       <div className="terminal-card">
         <div className="panel-header">
           <span className="panel-title">Income Streams</span>
-          <span className="mono-num text-sm text-accent-green font-semibold">
-            {formatCurrency(totalCurrentAnnual, { compact: true })} / YR CURRENT
+          <span className="mono-num text-sm font-semibold" style={{ color: 'var(--accent-green)' }}>
+            {formatCurrency(annualRunRate, { compact: true })} / YR PACE
           </span>
         </div>
-        {streams.length === 0 ? (
-          <p className="p-4 text-xs font-mono text-[#888] text-center uppercase tracking-widest">
-            No income streams found
-          </p>
-        ) : (
-          <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {streams.map((stream, idx) => (
-              <StreamCard
-                key={stream.id}
-                stream={stream}
-                color={STREAM_COLORS[idx % STREAM_COLORS.length]}
-              />
-            ))}
-          </div>
-        )}
+        <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {sources.map((src) => {
+            const delta = src.lastAmount - src.prevAmount;
+            const up = delta >= 0;
+            return (
+              <div key={src.source} className="terminal-card p-4 space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-[#e8e8e8]">
+                    {src.source}
+                  </h3>
+                  <div className="w-2 h-2 rounded-full flex-shrink-0 mt-1" style={{ backgroundColor: src.color }} />
+                </div>
+                <div>
+                  <p className="data-label mb-0.5">LAST MONTH</p>
+                  <p className="font-mono tabular-nums text-2xl font-bold" style={{ color: src.color }}>
+                    {formatCurrency(src.lastAmount)}
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-3 pt-1 border-t border-[#2a2a2a]">
+                  <div>
+                    <p className="data-label mb-0.5">YTD {year}</p>
+                    <p className="mono-num text-sm text-[#e8e8e8]">
+                      {formatCurrency(src.ytd, { compact: true })}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="data-label mb-0.5">MOM</p>
+                    <p className="mono-num text-sm" style={{ color: up ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                      {up ? '+' : ''}{formatCurrency(delta)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
-      {/* ── Section B — 5-Year Income Projection ─────────────────────────── */}
-      {streams.length > 0 && (
+      {/* ── Section C — Monthly Income Chart ──────────────────────────────── */}
+      {entries.length > 0 && (
         <div className="terminal-card">
           <div className="panel-header">
-            <span className="panel-title">5-Year Income Projection</span>
+            <span className="panel-title">Monthly Income — Actuals</span>
             <div className="flex items-center gap-3">
-              {YEAR_TARGETS.map((t) => (
-                <span
-                  key={t.year}
-                  className="text-[10px] font-mono"
-                  style={{ color: t.color }}
-                >
-                  {t.year}: {t.label}
-                </span>
-              ))}
+              <span className="text-[10px] font-mono text-[#888]">SOLID = ACTUAL</span>
+              <span className="text-[10px] font-mono text-[#888]">DASHED = TARGET</span>
             </div>
           </div>
-          <div className="p-4" style={{ height: 320 }}>
+          <div className="p-4" style={{ height: 300 }}>
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart
-                data={chartData}
-                margin={{ top: 8, right: 16, left: 8, bottom: 8 }}
-              >
-                <defs>
-                  {streams.map((stream, idx) => {
-                    const color = STREAM_COLORS[idx % STREAM_COLORS.length];
-                    const key = streamKey(stream);
-                    return (
-                      <linearGradient
-                        key={key}
-                        id={`grad-${key}`}
-                        x1="0"
-                        y1="0"
-                        x2="0"
-                        y2="1"
-                      >
-                        <stop offset="5%" stopColor={color} stopOpacity={0.3} />
-                        <stop offset="95%" stopColor={color} stopOpacity={0.02} />
-                      </linearGradient>
-                    );
-                  })}
-                </defs>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="#2a2a2a"
-                  vertical={false}
-                />
+              <BarChart data={chartData} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" vertical={false} />
                 <XAxis
-                  dataKey="year"
-                  tick={{ fill: '#888', fontSize: 11, fontFamily: 'JetBrains Mono' }}
+                  dataKey="period"
+                  tick={{ fill: '#888', fontSize: 10, fontFamily: 'JetBrains Mono' }}
                   stroke="#2a2a2a"
+                  tickFormatter={(v: string) => v.slice(2)}
                 />
                 <YAxis
                   tick={{ fill: '#888', fontSize: 10, fontFamily: 'JetBrains Mono' }}
@@ -397,36 +378,20 @@ export default function BusinessIncome() {
                   stroke="#2a2a2a"
                 />
                 <Tooltip
-                  content={<IncomeTooltip streams={streams} />}
-                  cursor={{ stroke: '#2a2a2a', strokeWidth: 1 }}
+                  contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a', fontFamily: 'monospace', fontSize: 11 }}
+                  formatter={(value: number, name: string) => [formatCurrency(value), name]}
+                  labelFormatter={(l: string) => l}
                 />
-                <Legend
-                  formatter={(value: string) => {
-                    const stream = streams.find((s) => s.id === value);
-                    return (
-                      <span
-                        style={{
-                          fontSize: 10,
-                          fontFamily: 'JetBrains Mono',
-                          color: '#888',
-                        }}
-                      >
-                        {stream?.stream_name ?? value}
-                      </span>
-                    );
-                  }}
-                />
-
-                {/* Year target reference lines */}
+                {/* Monthly equivalent target reference lines */}
                 {YEAR_TARGETS.map((t) => (
                   <ReferenceLine
-                    key={t.year}
-                    y={t.value}
+                    key={t.label}
+                    y={Math.round(t.value / 12)}
                     stroke={t.color}
                     strokeDasharray="6 3"
                     strokeWidth={1}
                     label={{
-                      value: `${t.year} ${t.label}`,
+                      value: `${t.label} /mo`,
                       fill: t.color,
                       fontSize: 9,
                       fontFamily: 'JetBrains Mono',
@@ -434,62 +399,34 @@ export default function BusinessIncome() {
                     }}
                   />
                 ))}
-
-                {/* Stacked areas, one per stream */}
-                {streams.map((stream, idx) => {
-                  const color = STREAM_COLORS[idx % STREAM_COLORS.length];
-                  const key = streamKey(stream);
-                  return (
-                    <Area
-                      key={key}
-                      type="monotone"
-                      dataKey={key}
-                      name={key}
-                      stackId="income"
-                      stroke={color}
-                      strokeWidth={1.5}
-                      fill={`url(#grad-${key})`}
-                      dot={false}
-                      activeDot={{ r: 3, fill: color }}
-                    />
-                  );
-                })}
-              </AreaChart>
+                {sourceNames.map((src) => (
+                  <Bar key={src} dataKey={src} stackId="income" fill={sourceColor(src)} maxBarSize={48} />
+                ))}
+              </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
       )}
 
-      {/* ── Section C — Goal Tracker Table ───────────────────────────────── */}
+      {/* ── Section D — Financial Goal Tracker ───────────────────────────── */}
       <div className="terminal-card">
         <div className="panel-header">
-          <span className="panel-title">Goal Tracker</span>
+          <span className="panel-title">Financial Goals</span>
           <span className="text-xs font-mono text-[#888]">
             {goals.length} GOALS
           </span>
         </div>
         {goals.length === 0 ? (
           <p className="p-4 text-xs font-mono text-[#888] text-center uppercase tracking-widest">
-            No goals found
+            No financial goals found
           </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs font-mono">
               <thead>
                 <tr className="border-b border-[#2a2a2a]">
-                  {[
-                    'GOAL',
-                    'TARGET',
-                    'CURRENT',
-                    'GAP',
-                    'DEADLINE',
-                    'PROGRESS',
-                    'STATUS',
-                  ].map((col) => (
-                    <th
-                      key={col}
-                      className="px-3 py-2 text-left uppercase tracking-wider text-[#888] font-semibold whitespace-nowrap"
-                    >
+                  {['GOAL', 'TARGET', 'CURRENT', 'GAP', 'DEADLINE', 'PROGRESS', 'STATUS'].map((col) => (
+                    <th key={col} className="px-3 py-2 text-left uppercase tracking-wider text-[#888] font-semibold whitespace-nowrap">
                       {col}
                     </th>
                   ))}
@@ -503,108 +440,51 @@ export default function BusinessIncome() {
                   const days = daysUntil(goal.target_date);
                   const isOverdue = status === 'OVERDUE';
                   const isComplete = status === 'COMPLETE';
-
-                  const progressColor = isComplete
-                    ? '#888'
-                    : isOverdue
-                    ? '#ff4444'
-                    : status === 'AT_RISK'
-                    ? '#ffaa00'
-                    : '#00ff88';
+                  const progressColor = isComplete ? '#888' : isOverdue ? '#ff4444' : status === 'AT_RISK' ? '#ffaa00' : '#00ff88';
 
                   return (
                     <tr
                       key={goal.id}
-                      className={`border-b border-[#1a1a1a] transition-colors ${
-                        isOverdue
-                          ? 'bg-[rgba(255,68,68,0.05)] hover:bg-[rgba(255,68,68,0.08)]'
-                          : 'hover:bg-[#1a1a1a]'
-                      }`}
+                      className={`border-b border-[#1a1a1a] transition-colors ${isOverdue ? 'bg-[rgba(255,68,68,0.05)] hover:bg-[rgba(255,68,68,0.08)]' : 'hover:bg-[#1a1a1a]'}`}
                     >
-                      {/* Goal name */}
                       <td className="px-3 py-3 max-w-[200px]">
                         <div className="flex items-center gap-2">
-                          {isComplete && (
-                            <CheckCircle size={12} className="text-[#888] flex-shrink-0" />
-                          )}
-                          <span
-                            className={`truncate ${
-                              isOverdue ? 'text-accent-red' : 'text-[#e8e8e8]'
-                            }`}
-                          >
+                          {isComplete && <CheckCircle size={12} className="text-[#888] flex-shrink-0" />}
+                          <span className={`truncate ${isOverdue ? 'text-accent-red' : 'text-[#e8e8e8]'}`}>
                             {goal.goal_name}
                           </span>
                         </div>
                         {goal.layer && (
-                          <span className="text-[10px] text-[#888] uppercase mt-0.5 block">
-                            {goal.layer}
-                          </span>
+                          <span className="text-[10px] text-[#888] uppercase mt-0.5 block">{goal.layer}</span>
                         )}
                       </td>
-
-                      {/* Target */}
                       <td className="px-3 py-3 tabular-nums text-right whitespace-nowrap text-[#e8e8e8]">
                         {formatCurrency(goal.target_value, { compact: true })}
                       </td>
-
-                      {/* Current */}
                       <td className="px-3 py-3 tabular-nums text-right whitespace-nowrap text-accent-green">
                         {formatCurrency(goal.current_value, { compact: true })}
                       </td>
-
-                      {/* Gap */}
-                      <td
-                        className={`px-3 py-3 tabular-nums text-right whitespace-nowrap ${
-                          gap === 0 ? 'text-[#888]' : 'text-[#e8e8e8]'
-                        }`}
-                      >
+                      <td className={`px-3 py-3 tabular-nums text-right whitespace-nowrap ${gap === 0 ? 'text-[#888]' : 'text-[#e8e8e8]'}`}>
                         {gap === 0 ? '—' : formatCurrency(gap, { compact: true })}
                       </td>
-
-                      {/* Deadline */}
                       <td className="px-3 py-3 whitespace-nowrap">
                         <div className={isOverdue ? 'text-accent-red' : 'text-[#e8e8e8]'}>
                           {formatDate(goal.target_date, 'medium')}
                         </div>
-                        <div
-                          className={`text-[10px] mt-0.5 ${
-                            isOverdue
-                              ? 'text-accent-red'
-                              : days <= 30
-                              ? 'text-accent-amber'
-                              : 'text-[#888]'
-                          }`}
-                        >
-                          {isOverdue
-                            ? `${Math.abs(days)}d OVERDUE`
-                            : isComplete
-                            ? 'DONE'
-                            : `${days}d left`}
+                        <div className={`text-[10px] mt-0.5 ${isOverdue ? 'text-accent-red' : days <= 30 ? 'text-accent-amber' : 'text-[#888]'}`}>
+                          {isOverdue ? `${Math.abs(days)}d OVERDUE` : isComplete ? 'DONE' : `${days}d left`}
                         </div>
                       </td>
-
-                      {/* Progress bar */}
                       <td className="px-3 py-3 min-w-[100px]">
                         <div className="space-y-1">
                           <div className="progress-track">
-                            <div
-                              className="progress-fill"
-                              style={{
-                                width: `${progress}%`,
-                                backgroundColor: progressColor,
-                              }}
-                            />
+                            <div className="progress-fill" style={{ width: `${progress}%`, backgroundColor: progressColor }} />
                           </div>
-                          <span
-                            className="text-[10px] tabular-nums"
-                            style={{ color: progressColor }}
-                          >
+                          <span className="text-[10px] tabular-nums" style={{ color: progressColor }}>
                             {formatPercent(progress, { decimals: 0 })}
                           </span>
                         </div>
                       </td>
-
-                      {/* Status badge */}
                       <td className="px-3 py-3 whitespace-nowrap">
                         <StatusBadge status={status} />
                       </td>
