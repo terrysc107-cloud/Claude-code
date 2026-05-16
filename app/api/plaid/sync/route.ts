@@ -61,21 +61,23 @@ function flattenTransaction(t: PlaidTransaction) {
 
 // ─── Route handler ────────────────────────────────────────────────────────────
 
-// Supports both POST (Vercel cron) and GET (manual trigger from dashboard)
+// GET = Vercel cron (requires CRON_SECRET). POST = manual trigger from dashboard (no auth needed).
 export async function GET(req: NextRequest) {
-  return handler(req);
+  return handler(req, true);
 }
 export async function POST(req: NextRequest) {
-  return handler(req);
+  return handler(req, false);
 }
 
-async function handler(req: NextRequest) {
-  // Protect with CRON_SECRET when set
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const auth = req.headers.get('authorization');
-    if (auth !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+async function handler(req: NextRequest, requireAuth: boolean) {
+  // Protect cron endpoint with CRON_SECRET when set
+  if (requireAuth) {
+    const cronSecret = process.env.CRON_SECRET;
+    if (cronSecret) {
+      const auth = req.headers.get('authorization');
+      if (auth !== `Bearer ${cronSecret}`) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
     }
   }
 

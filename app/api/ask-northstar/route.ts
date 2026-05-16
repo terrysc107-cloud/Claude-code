@@ -114,7 +114,7 @@ ${txSummary}
       .insert({
         client_id: CLIENT_ID,
         session_date: new Date().toISOString().split("T")[0],
-        insight_type: "chat_qa",
+        insight_type: "chat",
         topic: question.substring(0, 100),
         insight: `Q: ${question}\n\nA: ${answer}`,
         tags: ["chat", "north_star"],
