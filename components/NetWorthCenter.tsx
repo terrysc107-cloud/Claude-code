@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { RefreshCw } from "lucide-react";
 import {
   LineChart,
   Line,
@@ -34,10 +35,22 @@ interface InvestmentAccountRow {
   last_updated: string | null;
 }
 
+interface PlaidAccountRow {
+  account_id: string;
+  account_name: string | null;
+  official_name: string | null;
+  account_type: string | null;
+  account_subtype: string | null;
+  current_balance: number | null;
+  mask: string | null;
+  last_updated: string | null;
+}
+
 interface NetWorthCenterState {
   snapshots: NetWorthSnapshot[];
   properties: Property[];
   investments: InvestmentAccountRow[];
+  plaidAccounts: PlaidAccountRow[];
   error: string | null;
 }
 
@@ -154,15 +167,17 @@ export function NetWorthCenter() {
     snapshots: [],
     properties: [],
     investments: [],
+    plaidAccounts: [],
     error: null,
   });
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
 
   const fetchData = useCallback(async () => {
     const supabase = createBrowserClient();
 
     try {
-      const [snapshotsResult, propertiesResult, investmentsResult] =
+      const [snapshotsResult, propertiesResult, investmentsResult, plaidResult] =
         await Promise.all([
           supabase
             .schema("north_star")
@@ -188,6 +203,13 @@ export function NetWorthCenter() {
             .select("id, account_name, account_type, current_balance, monthly_contribution, strategy, last_updated")
             .eq("client_id", CLIENT_ID)
             .order("current_balance", { ascending: false }),
+
+          supabase
+            .schema("north_star")
+            .from("plaid_accounts")
+            .select("account_id, account_name, official_name, account_type, account_subtype, current_balance, mask, last_updated")
+            .eq("client_id", CLIENT_ID)
+            .order("current_balance", { ascending: false, nullsFirst: false }),
         ]);
 
       if (snapshotsResult.error) throw snapshotsResult.error;
@@ -197,6 +219,7 @@ export function NetWorthCenter() {
         snapshots: snapshotsResult.data ?? [],
         properties: propertiesResult.data ?? [],
         investments: (investmentsResult.data as InvestmentAccountRow[]) ?? [],
+        plaidAccounts: (plaidResult.data as PlaidAccountRow[]) ?? [],
         error: null,
       });
     } catch (err) {
@@ -214,7 +237,17 @@ export function NetWorthCenter() {
     fetchData();
   }, [fetchData]);
 
-  const { snapshots, properties, investments, error } = state;
+  const triggerPlaidSync = useCallback(async () => {
+    setSyncing(true);
+    try {
+      await fetch('/api/plaid/sync', { method: 'POST' });
+      await fetchData();
+    } finally {
+      setSyncing(false);
+    }
+  }, [fetchData]);
+
+  const { snapshots, properties, investments, plaidAccounts, error } = state;
 
   // ── Derived chart data ────────────────────────────────────────────────────
 
@@ -686,22 +719,46 @@ export function NetWorthCenter() {
         <div className="terminal-card">
           <div className="panel-header">
             <span className="panel-title">INVESTMENT ACCOUNTS</span>
-            {!loading && investments.length > 0 && (() => {
-              const dates = investments
-                .filter((a) => a.last_updated)
-                .map((a) => a.last_updated as string)
-                .sort();
-              const oldest = dates[0];
-              if (!oldest) return null;
-              const daysAgo = Math.round(
-                (Date.now() - new Date(oldest).getTime()) / (1000 * 60 * 60 * 24)
-              );
-              return (
-                <span className="font-mono text-xs" style={{ color: daysAgo > 14 ? "var(--accent-amber)" : "var(--text-secondary)" }}>
-                  updated {daysAgo}d ago
-                </span>
-              );
-            })()}
+            <div className="flex items-center gap-2">
+              {!loading && (() => {
+                if (plaidAccounts.length > 0) {
+                  const latest = plaidAccounts
+                    .filter((a) => a.last_updated)
+                    .map((a) => a.last_updated as string)
+                    .sort()
+                    .pop();
+                  const daysAgo = latest
+                    ? Math.round((Date.now() - new Date(latest).getTime()) / (1000 * 60 * 60 * 24))
+                    : null;
+                  return (
+                    <span className="font-mono text-xs" style={{ color: daysAgo != null && daysAgo > 3 ? "var(--accent-amber)" : "var(--accent-green)" }}>
+                      PLAID · {daysAgo != null ? `${daysAgo}d ago` : "synced"}
+                    </span>
+                  );
+                }
+                const oldest = investments
+                  .filter((a) => a.last_updated)
+                  .map((a) => a.last_updated as string)
+                  .sort()[0];
+                const daysAgo = oldest
+                  ? Math.round((Date.now() - new Date(oldest).getTime()) / (1000 * 60 * 60 * 24))
+                  : null;
+                return (
+                  <span className="font-mono text-xs" style={{ color: "var(--accent-amber)" }}>
+                    MANUAL · {daysAgo != null ? `${daysAgo}d ago` : "—"}
+                  </span>
+                );
+              })()}
+              <button
+                onClick={triggerPlaidSync}
+                disabled={syncing}
+                className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider border border-border rounded-sm hover:border-accent-green hover:text-accent-green transition-colors disabled:opacity-40"
+                title="Sync Plaid balances now"
+              >
+                <RefreshCw size={10} className={syncing ? "animate-spin" : ""} />
+                {syncing ? "SYNCING" : "SYNC"}
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -724,48 +781,68 @@ export function NetWorthCenter() {
                 </tr>
               </thead>
               <tbody>
-                {loading
-                  ? Array.from({ length: 5 }).map((_, i) => (
-                      <TableRowSkeleton key={i} cols={4} />
-                    ))
-                  : investments.map((account) => (
-                      <tr
-                        key={account.id}
-                        style={{ borderBottom: "1px solid var(--border)" }}
-                        className="hover:bg-surface-2 transition-colors"
+                {loading ? (
+                  Array.from({ length: 5 }).map((_, i) => (
+                    <TableRowSkeleton key={i} cols={4} />
+                  ))
+                ) : plaidAccounts.length > 0 ? (
+                  // Live Plaid data takes priority
+                  plaidAccounts.map((acct) => (
+                    <tr
+                      key={acct.account_id}
+                      style={{ borderBottom: "1px solid var(--border)" }}
+                      className="hover:bg-surface-2 transition-colors"
+                    >
+                      <td className="px-3 py-2 font-mono" style={{ color: "var(--text-primary)" }}>
+                        {acct.official_name ?? acct.account_name ?? "—"}
+                        {acct.mask && (
+                          <span className="ml-1.5 text-[10px]" style={{ color: "var(--text-secondary)" }}>
+                            ···{acct.mask}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 font-mono uppercase" style={{ color: "var(--text-secondary)", fontSize: 10 }}>
+                        {acct.account_subtype ?? acct.account_type ?? "—"}
+                      </td>
+                      <td
+                        className="px-3 py-2 mono-num tabular-nums font-semibold"
+                        style={{ color: (acct.current_balance ?? 0) > 0 ? "var(--accent-green)" : "var(--text-secondary)" }}
                       >
-                        <td
-                          className="px-3 py-2 font-mono"
-                          style={{ color: "var(--text-primary)" }}
-                        >
-                          {account.account_name}
-                        </td>
-                        <td
-                          className="px-3 py-2 font-mono uppercase"
-                          style={{ color: "var(--text-secondary)", fontSize: 10 }}
-                        >
-                          {account.account_type}
-                        </td>
-                        <td
-                          className="px-3 py-2 mono-num tabular-nums font-semibold"
-                          style={{
-                            color: account.current_balance > 0
-                              ? "var(--accent-green)"
-                              : "var(--text-secondary)",
-                          }}
-                        >
-                          {formatCurrency(account.current_balance)}
-                        </td>
-                        <td
-                          className="px-3 py-2 mono-num tabular-nums"
-                          style={{ color: "var(--text-secondary)" }}
-                        >
-                          {account.monthly_contribution > 0
-                            ? `+${formatCurrency(account.monthly_contribution)}`
-                            : "—"}
-                        </td>
-                      </tr>
-                    ))}
+                        {acct.current_balance != null ? formatCurrency(acct.current_balance) : "—"}
+                      </td>
+                      <td className="px-3 py-2 mono-num tabular-nums" style={{ color: "var(--text-secondary)" }}>
+                        —
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  // Fall back to manually-maintained investment_accounts
+                  investments.map((account) => (
+                    <tr
+                      key={account.id}
+                      style={{ borderBottom: "1px solid var(--border)" }}
+                      className="hover:bg-surface-2 transition-colors"
+                    >
+                      <td className="px-3 py-2 font-mono" style={{ color: "var(--text-primary)" }}>
+                        {account.account_name}
+                      </td>
+                      <td className="px-3 py-2 font-mono uppercase" style={{ color: "var(--text-secondary)", fontSize: 10 }}>
+                        {account.account_type}
+                      </td>
+                      <td
+                        className="px-3 py-2 mono-num tabular-nums font-semibold"
+                        style={{ color: account.current_balance > 0 ? "var(--accent-green)" : "var(--text-secondary)" }}
+                      >
+                        {formatCurrency(account.current_balance)}
+                      </td>
+                      <td className="px-3 py-2 mono-num tabular-nums" style={{ color: "var(--text-secondary)" }}>
+                        {account.monthly_contribution > 0
+                          ? `+${formatCurrency(account.monthly_contribution)}`
+                          : "—"}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
