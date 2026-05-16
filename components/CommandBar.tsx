@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { RefreshCw } from "lucide-react";
 import { createBrowserClient, CLIENT_ID } from "@/lib/supabase";
 import { formatCurrency, daysUntil } from "@/lib/formatters";
 import type { Property, Goal, NetWorthSnapshot } from "@/types";
@@ -82,6 +83,7 @@ export function CommandBar() {
     lastTxDate: null,
   });
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [blink, setBlink] = useState(true);
 
   // Pulse the live indicator
@@ -206,6 +208,12 @@ export function CommandBar() {
     fetchData();
   }, [fetchData]);
 
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchData();
+    setRefreshing(false);
+  }, [fetchData]);
+
   const {
     netWorth,
     netWorthTarget,
@@ -267,6 +275,17 @@ export function CommandBar() {
             COTTONSTONE
           </span>
         </div>
+
+        {/* Refresh */}
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing || loading}
+          className="ml-2 p-1.5 shrink-0 text-text-secondary hover:text-accent-green transition-colors disabled:opacity-30"
+          title="Refresh command bar"
+          aria-label="Refresh"
+        >
+          <RefreshCw size={11} className={refreshing ? "animate-spin" : ""} />
+        </button>
 
         {loading ? (
           <div className="flex items-center gap-0 h-full">
