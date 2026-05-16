@@ -126,8 +126,10 @@ ${txSummary}
     });
   } catch (err) {
     console.error("Ask North Star error:", err);
+    const message = err instanceof Error ? err.message : "Failed to process question";
+    const isApiKeyMissing = message.includes("ANTHROPIC_API_KEY");
     return NextResponse.json(
-      { error: "Failed to process question" },
+      { error: isApiKeyMissing ? "ANTHROPIC_API_KEY is not configured — set it in Vercel environment variables." : message },
       { status: 500 }
     );
   }
