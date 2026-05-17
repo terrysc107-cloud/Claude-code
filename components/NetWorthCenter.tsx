@@ -17,6 +17,7 @@ import {
 } from "recharts";
 import { createBrowserClient, CLIENT_ID } from "@/lib/supabase";
 import { formatCurrency, formatPercent, formatDate } from "@/lib/formatters";
+import { PlaidLinkButton } from "@/components/PlaidLinkButton";
 import type {
   NetWorthSnapshot,
   Property,
@@ -768,6 +769,7 @@ export function NetWorthCenter() {
                 {syncStatus === 'error' && (
                   <span className="font-mono text-[10px]" style={{ color: 'var(--accent-red)' }}>SYNC FAILED</span>
                 )}
+                <PlaidLinkButton onSuccess={triggerPlaidSync} />
                 <button
                   onClick={triggerPlaidSync}
                   disabled={syncing}
