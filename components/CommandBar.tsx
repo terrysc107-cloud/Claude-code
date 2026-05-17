@@ -418,8 +418,8 @@ export function CommandBar() {
                 TX SYNC
               </span>
               {lastTxDate ? (() => {
-                const daysAgo = Math.round(
-                  (Date.now() - new Date(lastTxDate).getTime()) / (1000 * 60 * 60 * 24)
+                const daysAgo = Math.floor(
+                  (Date.now() - new Date(lastTxDate + 'T00:00:00').getTime()) / (1000 * 60 * 60 * 24)
                 );
                 const stale = daysAgo > 7;
                 const color = daysAgo <= 1
