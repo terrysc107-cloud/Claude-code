@@ -172,6 +172,7 @@ export function NetWorthCenter() {
   });
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'ok' | 'error'>('idle');
 
   const fetchData = useCallback(async () => {
     const supabase = createBrowserClient();
@@ -239,9 +240,20 @@ export function NetWorthCenter() {
 
   const triggerPlaidSync = useCallback(async () => {
     setSyncing(true);
+    setSyncStatus('idle');
     try {
-      await fetch('/api/plaid/sync', { method: 'POST' });
+      const res = await fetch('/api/plaid/sync', { method: 'POST' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
       await fetchData();
+      setSyncStatus('ok');
+      setTimeout(() => setSyncStatus('idle'), 4000);
+    } catch (err) {
+      console.error('[NetWorthCenter] Plaid sync error:', err);
+      setSyncStatus('error');
+      setTimeout(() => setSyncStatus('idle'), 6000);
     } finally {
       setSyncing(false);
     }
@@ -749,15 +761,23 @@ export function NetWorthCenter() {
                   </span>
                 );
               })()}
-              <button
-                onClick={triggerPlaidSync}
-                disabled={syncing}
-                className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider border border-border rounded-sm hover:border-accent-green hover:text-accent-green transition-colors disabled:opacity-40"
-                title="Sync Plaid balances now"
-              >
-                <RefreshCw size={10} className={syncing ? "animate-spin" : ""} />
-                {syncing ? "SYNCING" : "SYNC"}
-              </button>
+              <div className="flex items-center gap-2">
+                {syncStatus === 'ok' && (
+                  <span className="font-mono text-[10px]" style={{ color: 'var(--accent-green)' }}>SYNCED ✓</span>
+                )}
+                {syncStatus === 'error' && (
+                  <span className="font-mono text-[10px]" style={{ color: 'var(--accent-red)' }}>SYNC FAILED</span>
+                )}
+                <button
+                  onClick={triggerPlaidSync}
+                  disabled={syncing}
+                  className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider border border-border rounded-sm hover:border-accent-green hover:text-accent-green transition-colors disabled:opacity-40"
+                  title="Sync Plaid balances now"
+                >
+                  <RefreshCw size={10} className={syncing ? "animate-spin" : ""} />
+                  {syncing ? "SYNCING" : "SYNC"}
+                </button>
+              </div>
             </div>
           </div>
 

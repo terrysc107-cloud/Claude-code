@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { CLIENT_ID } from '@/lib/supabase';
 
 // ─── Plaid env routing ────────────────────────────────────────────────────────
 
@@ -92,8 +93,6 @@ async function handler(req: NextRequest, requireAuth: boolean) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
-
-  const CLIENT_ID = 'a1000000-0000-0000-0000-000000000001';
 
   // Read all Plaid tokens
   const { data: tokens, error: tokensErr } = await supabase
